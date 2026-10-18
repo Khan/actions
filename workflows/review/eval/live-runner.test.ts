@@ -28,7 +28,7 @@ import {
 /* A mocked SDK: capture the options, replay a scripted message stream       */
 /* -------------------------------------------------------------------------- */
 
-type Script = {messages: unknown[]; throwAfter?: Error};
+type Script = {messages: unknown[]; throwAfter?: Error; waitForAbort?: boolean};
 let lastOptions: Record<string, unknown> = {};
 let script: Script = {messages: []};
 
@@ -39,6 +39,22 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
         return (async function* () {
             for (const message of current.messages) {
                 yield message;
+            }
+            if (
+                current.waitForAbort === true ||
+                current.finishOnAbort === true
+            ) {
+                const abort = options["abortController"] as AbortController;
+                await new Promise<void>((resolve, reject) => {
+                    abort.signal.addEventListener(
+                        "abort",
+                        () =>
+                            current.finishOnAbort === true
+                                ? resolve()
+                                : reject(abort.signal.reason),
+                        {once: true},
+                    );
+                });
             }
             if (current.throwAfter !== undefined) {
                 throw current.throwAfter;
@@ -87,6 +103,195 @@ describe("sdkRunner", () => {
     });
     afterAll(() => {
         rmSync(dir, {recursive: true, force: true});
+    });
+
+    const recorded = (name: string) =>
+        JSON.parse(
+            readFileSync(
+                join(
+                    dir,
+                    name,
+                    "candidate",
+                    "case-1",
+                    "correctness-reviewer-1.json",
+                ),
+                "utf8",
+            ),
+        );
+    const rawUsage = {
+        input_tokens: 12,
+        output_tokens: 4,
+        cache_read_input_tokens: 30,
+        cache_creation_input_tokens: 7,
+    };
+    const modelUsage = {
+        "billed-model": {
+            inputTokens: 12,
+            outputTokens: 4,
+            cacheReadInputTokens: 30,
+            cacheCreationInputTokens: 7,
+        },
+    };
+    const usage = [
+        {
+            model: "billed-model",
+            input: 12,
+            output: 4,
+            cacheRead: 30,
+            cacheWrite: 7,
+        },
+    ];
+    const meteredMessage = {
+        type: "assistant",
+        message: {
+            role: "assistant",
+            id: "msg-1",
+            model: "billed-model",
+            content: [{type: "text", text: "done"}],
+            usage: rawUsage,
+            stop_reason: "end_turn",
+        },
+    };
+
+    it("keeps raw message snapshots but takes totals only from the SDK result", async () => {
+        script = {
+            messages: [
+                meteredMessage,
+                meteredMessage,
+                {...success(), modelUsage},
+            ],
+        };
+        const result = await sdkRunner({transcriptsDir: join(dir, "usage")})(
+            request(),
+        );
+        const transcript = recorded("usage");
+        expect(transcript.messages).toHaveLength(2);
+        expect(transcript.messages[0]).toMatchObject({
+            id: "msg-1",
+            model: "billed-model",
+            usage: rawUsage,
+        });
+        expect(transcript.messages[1].usage).toEqual(rawUsage);
+        expect(transcript.outcome).toEqual({
+            status: "success",
+            wallMs: expect.any(Number),
+            resultSubtype: "success",
+            stopReason: "end_turn",
+            usd: 0.01,
+            turns: 1,
+            usage,
+        });
+        expect(transcript.outcome.usage).toEqual(result.usage);
+        expect(transcript.outcome.usage[0]).not.toHaveProperty("reasoning");
+    });
+
+    it("keeps error-result usage and provider errors before rejecting the dispatch", async () => {
+        script = {
+            messages: [
+                meteredMessage,
+                {
+                    ...success(),
+                    subtype: "error_max_turns",
+                    modelUsage,
+                    errors: ["turn limit reached"],
+                },
+            ],
+        };
+        await expect(
+            sdkRunner({transcriptsDir: join(dir, "error-result")})(request()),
+        ).rejects.toThrow("error_max_turns");
+        expect(recorded("error-result").outcome).toEqual({
+            status: "error",
+            wallMs: expect.any(Number),
+            resultSubtype: "error_max_turns",
+            stopReason: "end_turn",
+            usd: 0.01,
+            turns: 1,
+            usage,
+            errorMessage: "turn limit reached",
+        });
+    });
+
+    it("retains message usage on a transport failure without inventing result totals", async () => {
+        script = {
+            messages: [meteredMessage],
+            throwAfter: new Error("connection lost"),
+        };
+        await expect(
+            sdkRunner({transcriptsDir: join(dir, "transport")})(request()),
+        ).rejects.toThrow("connection lost");
+        const transcript = recorded("transport");
+        expect(transcript.messages[0].usage).toEqual(rawUsage);
+        expect(transcript.outcome).toEqual({
+            status: "error",
+            wallMs: expect.any(Number),
+            stopReason: "end_turn",
+            errorMessage: "connection lost",
+        });
+    });
+
+    it("records the timeout and the usage seen before abort", async () => {
+        script = {messages: [meteredMessage], waitForAbort: true};
+        await expect(
+            sdkRunner({transcriptsDir: join(dir, "timeout")})(
+                request({timeoutMs: 5}),
+            ),
+        ).rejects.toThrow("timed out after 5ms");
+        const transcript = recorded("timeout");
+        expect(transcript.messages[0].usage).toEqual(rawUsage);
+        expect(transcript.outcome).toEqual({
+            status: "timeout",
+            wallMs: expect.any(Number),
+            stopReason: "end_turn",
+            errorMessage: "sub-agent timed out after 5ms",
+        });
+    });
+
+    it("records a timeout when the SDK closes on abort without throwing", async () => {
+        script = {messages: [], finishOnAbort: true};
+        await sdkRunner({transcriptsDir: join(dir, "abort-close")})(
+            request({timeoutMs: 5}),
+        );
+        expect(recorded("abort-close").outcome).toEqual({
+            status: "timeout",
+            wallMs: expect.any(Number),
+            errorMessage: "Error: sub-agent timed out after 5ms",
+        });
+    });
+
+    it("distinguishes a missing result from a result reporting zero spend", async () => {
+        script = {messages: []};
+        await sdkRunner({transcriptsDir: join(dir, "missing")})(request());
+        expect(recorded("missing").outcome).toEqual({
+            status: "incomplete",
+            wallMs: expect.any(Number),
+        });
+        script = {messages: [{...success(), total_cost_usd: 0, num_turns: 0}]};
+        await sdkRunner({transcriptsDir: join(dir, "zero")})(request());
+        expect(recorded("zero").outcome).toEqual({
+            status: "success",
+            wallMs: expect.any(Number),
+            resultSubtype: "success",
+            usd: 0,
+            turns: 0,
+        });
+    });
+
+    it("does not hide a stream failure after a metered success result", async () => {
+        script = {
+            messages: [{...success(), modelUsage}],
+            throwAfter: new Error("stream broke"),
+        };
+        await expect(
+            sdkRunner({transcriptsDir: join(dir, "after-result")})(request()),
+        ).rejects.toThrow("stream broke");
+        expect(recorded("after-result").outcome).toMatchObject({
+            status: "error",
+            resultSubtype: "success",
+            usd: 0.01,
+            usage,
+            errorMessage: "stream broke",
+        });
     });
 
     it("restricts the toolset and installs the scope hook", async () => {
