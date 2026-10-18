@@ -1,0 +1,151 @@
+{
+    "provenance": {
+        "repo": "Khan/webapp",
+        "pr": 41896,
+        "reviewId": 5103292019,
+        "commentId": 3925652967,
+        "url": "https://github.com/Khan/webapp/pull/41896#discussion_r3925652967",
+        "reviewedCommit": "dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82",
+        "currentCommentCommit": "dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82",
+        "baseCommit": "a0cf511316541da2c91f36a64d7938913c894ffa",
+        "originalLine": 40,
+        "originalBody": "**suggestion (non-blocking):** The coaching loader fans a single failed lookup out to every kaid, so one student's transient error now denies the whole roster; scope it per-kaid the way the session loader does.\n\n<details><summary><sub>context</sub></summary>\n\nThe coaching loader fans a single failed lookup out to every kaid, so one student's transient error now denies the whole roster; consider scoping it per-kaid the way the session loader does. The sibling loader added in this PR states the principle explicitly (writing_coach_session_loader.go:70-73, \"Batching must not widen the blast radius: without this, one assignment's failed query would error out a healthy assignment's roster too, whereas the unbatched per-row calls failed independently\") and has a dedicated test for it (TestFetchWCSessionsScopesErrorToItsConfig). The coaching loader is the half where that principle was not applied, and it is the half with the worse outcome: a null field versus a 403.\n\nThe comment on this line assumes the batch-wide error means the actor's coach data is globally unavailable. It does not. services/coaches/relationships/coachee.go:70-98 shows `ManyCoachedBy` does not batch at the datastore layer \u2014 it fans out one `getCoachCoacheePair` per kaid in a tracegroup, and `err := g.Wait()` returns the first error (tracegroup is an errgroup fork with no concurrency limit). `acl.ManyCoachedByActorErr` then discards every successful result (`return result, err` with `result` still empty, pkg/khan/acl/coaches.go:112-118); this loader copies that one error into all `len(kaids)` slots; and `isActorCoachOrAdminBatched` (acls.go:120-124) logs it, gets `coached=false` for all, and falls through to `actorIsProgressViewingAdminForUser`, which a plain teacher fails.\n\nBefore this PR the same event denied exactly one row: `acl.IsCoachedByActor` ran per kaid against coaches' `IsCoachedBy`, a single key query (coachee.go:101-108) with its own request-cache entry. The happy-path win is unaffected by falling back per-kaid on error, since the fallback only runs when the batch already failed.\n\nOne caveat on the precedent: services/progress/resolvers/coaching_loader.go:38-45 does the identical all-keys fan-out, so this shape is the existing repo pattern for a batched coach check and a per-kaid fallback would diverge from it \u2014 worth deciding deliberately rather than treating it as an oversight.\n\nA sketch, not a committable replacement:\n\n````\n\tcoached, err := acl.ManyCoachedByActorErr(ktx, kaids)\n\tif err != nil {\n\t\t// coaches' manyCoachedBy fans out one lookup per kaid and returns the\n\t\t// first error, so a batch-wide failure says nothing about any\n\t\t// particular kaid. Fall back to the per-kaid check: one bad lookup\n\t\t// should deny one student, not the whole roster.\n\t\tktx.Log().Error(err)\n\t\tout := make([]bool, len(kaids))\n\t\tfor i, kaid := range kaids {\n\t\t\tout[i] = acl.IsCoachedByActor(ktx, kaid)\n\t\t}\n\t\treturn out, nil\n\t}\n\n// (acl.IsCoachedByActorErr does not exist; IsCoachedByActor is the bool form\n// at pkg/khan/acl/coaches.go:21 and already logs-and-denies internally.)\n````\n\n<sub>found by holistic | also flagged by security-auth (out-of-lane)</sub>\n\n</details>",
+        "replies": [
+            {
+                "id": 3925885355,
+                "body": "Local Claude says this suggestion is not applicable:\r\n\r\nThere's no per-kaid failure to scope here \u2014 \r\n  \u258e ManyCoachedByActorErr makes a single manyCoachedBy \r\n  \u258e call for the whole set and returns an empty map on \r\n  \u258e any failure, so the error is genuinely total rather\r\n  \u258e than one student's. Fanning it to every key is the\r\n  \u258e accurate representation; scoping it per-kaid would\r\n  \u258e mean inventing attribution that doesn't exist.\r\n  \u258e\r\n  \u258e It also doesn't change the authorization outcome. \r\n  \u258e On error we log and fall through to the admin check\r\n  \u258e \u2014 the same place we land on a legitimate \"not \r\n  \u258e coached.\" And it matches the unbatched path: \r\n  \u258e acl.IsCoachedByActor already \"returns false, and \r\n  \u258e additionally logs an error\" on failure, so a \r\n  \u258e coaches-service outage denied the whole roster \r\n  \u258e before this change too.\r\n  \u258e\r\n  \u258e The session loader scopes per-config because it \r\n  \u258e issues one query per config, so its failures really\r\n  \u258e are partial. Different query structure, different \r\n  \u258e granularity \u2014 both loaders attribute errors to \r\n  \u258e exactly the keys they affect."
+            }
+        ],
+        "evidence": [
+            {
+                "path": "pkg/khan/acl/coaches.go",
+                "commit": "dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82",
+                "startLine": 12,
+                "endLine": 64,
+                "url": "https://github.com/Khan/webapp/blob/dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82/pkg/khan/acl/coaches.go#L12-L64",
+                "fileSha256": "b347483d3d21be70e06036c6ec146f739417f55e88c3a539356e1f1b57e55c37",
+                "text": "// IsCoachedByActor returns true if the user with the given kaid (coachee) is\n// coached by the actor (coach).\n//\n// It returns false if the coachee is not coached by the actor.  It also\n// returns false, and additionally logs an error, if we were unable to\n// determine whether that is the case.  To handle errors explicitly, see\n// IsCoachedByActorErr.\n//\n//ka:permission-check\nfunc IsCoachedByActor(ctx aclContext, coacheeKaid string) bool {\n\tok, err := IsCoachedByActorErr(ctx, coacheeKaid)\n\tmaybeLog(ctx, err)\n\treturn ok\n}\n\n// IsCoachedByActorErr returns true if the use with the given kaid (coachee) is\n// coached by the actor (coach).\n//\n// It returns false if the coachee is not coached by the actor, and (false\n// and) an error only if we were unable to determine whether the actor coaches\n// the given user.  To simply log and deny access on error, see\n// IsCoachedByActor.\n//\n//ka:permission-check\nvar IsCoachedByActorErr = cache.Cache(\n\t_isCoachedByActorErr,\n\tcache.In(lib.RequestCache),\n\tcache.SkipCacheOnError,\n)\n\nfunc _isCoachedByActorErr(ctx aclContext, coacheeKaid string) (bool, error) {\n\t// early-out if we're a service-admin query; those don't have actors.\n\tif isServiceAdminQuery(ctx) {\n\t\treturn false, nil\n\t}\n\n\t// early-out if the current user is a phantom or pre-phantom -- only full\n\t// user accounts can be coaches.\n\tactor, err := ctx.RequestUser()\n\tif err != nil {\n\t\treturn false, err\n\t} else if actor.Kaid == \"\" || actor.IsPhantom {\n\t\treturn false, nil\n\t}\n\n\t_ = `# @genqlient\n\t\tquery PkgAcl_IsCoachedByACL($coachKaid: String!, $coacheeKaid: String!) {\n\t\t\tisCoachedBy(coachKaid: $coachKaid, coacheeKaid: $coacheeKaid)\n\t\t}\n\t`\n\tresp, err := genqlient.PkgAcl_IsCoachedByACL(\n\t\tctx, ctx.GraphQL().AsServiceAdmin(), actor.Kaid, coacheeKaid)\n\treturn resp.IsCoachedBy, err"
+            },
+            {
+                "path": "pkg/khan/acl/coaches.go",
+                "commit": "dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82",
+                "startLine": 82,
+                "endLine": 124,
+                "url": "https://github.com/Khan/webapp/blob/dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82/pkg/khan/acl/coaches.go#L82-L124",
+                "fileSha256": "b347483d3d21be70e06036c6ec146f739417f55e88c3a539356e1f1b57e55c37",
+                "text": "// ManyCoachedByActorErr runs a cross service call to determine which of the\n// provided coachee kaids are coached by the actor.\n//\n// It returns a map of kaids to booleans indicating which kaid is coached by\n// the actor. If an error occurs, then we return an empty map.\n// To simply log and deny access on error, see ManyCoachedByActor.\n//\n//ka:permission-check\nfunc ManyCoachedByActorErr(ctx aclContext, coacheeKaids []string) (map[string]bool, error) {\n\tresult := map[string]bool{}\n\n\t// early-out if we're a service-admin query; those don't have actors.\n\tif isServiceAdminQuery(ctx) {\n\t\treturn result, nil\n\t}\n\n\t// early-out if the current user is a phantom or pre-phantom -- only full\n\t// user accounts can be coaches.\n\tactor, err := ctx.RequestUser()\n\tif err != nil {\n\t\treturn result, err\n\t} else if actor.Kaid == \"\" || actor.IsPhantom {\n\t\treturn result, nil\n\t}\n\n\t_ = `# @genqlient\n\t\tquery PkgAcl_ManyCoachedByACL($coachKaid: String!, $coacheeKaids: [String!]!) {\n\t\t\tmanyCoachedBy(coachKaid: $coachKaid, coacheeKaids: $coacheeKaids)\n\t\t}\n\t`\n\tresp, err := genqlient.PkgAcl_ManyCoachedByACL(\n\t\tctx, ctx.GraphQL().AsServiceAdmin(), actor.Kaid, coacheeKaids)\n\tif err != nil {\n\t\treturn result, err\n\t}\n\n\t// The result from `manyCoachedBy` comes back in the same order in which\n\t// the coacheeKaids are provided.\n\tfor i := range coacheeKaids {\n\t\tresult[coacheeKaids[i]] = resp.ManyCoachedBy[i]\n\t}\n\n\treturn result, err"
+            },
+            {
+                "path": "services/coaches/relationships/coachee.go",
+                "commit": "dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82",
+                "startLine": 69,
+                "endLine": 109,
+                "url": "https://github.com/Khan/webapp/blob/dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82/services/coaches/relationships/coachee.go#L69-L109",
+                "fileSha256": "a22a0caed1bb58a177ccddd4693c7ce093301a6b41826022d1e6b2aeeb7d8b07",
+                "text": "// ManyCoachedBy determines who in the list of kaids is coached by a particular\n// coach.\nfunc ManyCoachedBy(ctx interface {\n\tkacontext.Base\n\tdatastore.KAContext\n},\n\tcoachKaid string,\n\tcoacheeKaids []string,\n) ([]bool, error) {\n\tg := tracegroup.WithContext(&ctx)\n\n\tresult := make([]bool, len(coacheeKaids))\n\n\tfor i, coacheeKaid := range coacheeKaids {\n\t\tg.Go(\"check coach-coachee pair\", func(ctx datastore.KAContext) error {\n\t\t\t_, err := getCoachCoacheePair(ctx, coachKaid, coacheeKaid)\n\t\t\tswitch {\n\t\t\tcase errors.Is(err, errors.NotFoundKind):\n\t\t\t\tresult[i] = false\n\t\t\t\treturn nil\n\t\t\tcase err != nil:\n\t\t\t\treturn err\n\t\t\tdefault:\n\t\t\t\tresult[i] = true\n\t\t\t\treturn nil\n\t\t\t}\n\t\t})\n\t}\n\n\terr := g.Wait()\n\treturn result, err\n}\n\n// IsCoachedBy determines if a coachee is coached by a particular user.\nfunc IsCoachedBy(ctx datastore.KAContext,\n\tcoachKaid string,\n\tcoacheeKaid string,\n) (bool, error) {\n\tkey := models.MakeCoachCoacheePairKey(coachKaid, coacheeKaid)\n\tquery := datastore.NewQuery(models.CoachCoacheePairKind).FilterField(\"__key__\", \"=\", key)\n\treturn crud.HasAny(ctx, query)"
+            },
+            {
+                "path": "services/ai-guide/essay_feedback/loaders/coaching_loader.go",
+                "commit": "dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82",
+                "startLine": 15,
+                "endLine": 52,
+                "url": "https://github.com/Khan/webapp/blob/dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82/services/ai-guide/essay_feedback/loaders/coaching_loader.go#L15-L52",
+                "fileSha256": "87631ed0593db1afcfe25ebd99a5e014678a0c43f77220d8cc40865a242f5263",
+                "text": "\n// coachingLoader batches the actor-coaches-kaid lookups that the field\n// resolvers of a roster issue one at a time. GraphQL resolves those fields\n// concurrently, so the whole roster's lookups land in a single batch and\n// become one manyCoachedBy call rather than one isCoachedBy call per student.\n//\n// acl.IsCoachedByActor is request-cached per coachee kaid, so it does not\n// collapse a roster on its own: distinct students share no cache entry.\nvar CoachingLoader = dataloader.CachedLoader(_batchLoadCoaching)\n\n// _batchLoadCoaching reports whether the actor coaches that kaid.\n//\n// A note on kacontext.Upgrade:\n// pkg/lib/dataloader hands this function to dataloadgen, which calls it\n// with a plain context.Context, so the resolver-caller's typed ktx can't reach\n// it. This is the third-party entrypoint kacontext.Upgrade is meant for.\nfunc _batchLoadCoaching(ctx context.Context, kaids []string) ([]bool, []error) {\n\tvar ktx interface {\n\t\tgqlclient.KAContext\n\t\tlog.KAContext\n\t\tweb.AuthedUserContext\n\t} = kacontext.Upgrade(ctx) //nolint:ka-context // dataloadgen entrypoint\n\n\tcoached, err := acl.ManyCoachedByActorErr(ktx, kaids)\n\tif err != nil {\n\t\t// The failure is not per-key, so report it against every key.\n\t\terrs := make([]error, len(kaids))\n\t\tfor i := range errs {\n\t\t\terrs[i] = err\n\t\t}\n\t\treturn make([]bool, len(kaids)), errs\n\t}\n\n\tout := make([]bool, len(kaids))\n\tfor i, kaid := range kaids {\n\t\tout[i] = coached[kaid]\n\t}\n\treturn out, nil"
+            },
+            {
+                "path": "services/ai-guide/essay_feedback/loaders/writing_coach_session_loader.go",
+                "commit": "dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82",
+                "startLine": 61,
+                "endLine": 89,
+                "url": "https://github.com/Khan/webapp/blob/dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82/services/ai-guide/essay_feedback/loaders/writing_coach_session_loader.go#L61-L89",
+                "fileSha256": "40d4ea6973d4922ac9006c8351f6ac96e260a6a6efd25cdabcb19e0db9855ee5",
+                "text": "\tsessionsByConfig := make(\n\t\tmap[string]map[string]*models.AIGuideEssaySession, len(kaidsByConfig),\n\t)\n\terrByConfig := map[string]error{}\n\tfor configID, kaids := range kaidsByConfig {\n\t\tsessions, err := essay_feedback.GetSessionByConfigIdAndKaids(\n\t\t\tktx, configID, kaids,\n\t\t)\n\t\tif err != nil {\n\t\t\t// A failure is scoped to the config that failed. Batching must not\n\t\t\t// widen the blast radius: without this, one assignment's failed\n\t\t\t// query would error out a healthy assignment's roster too, whereas\n\t\t\t// the unbatched per-row calls failed independently.\n\t\t\terrByConfig[configID] = err\n\t\t\tcontinue\n\t\t}\n\t\tsessionsByConfig[configID] = sessions\n\t}\n\n\tfound := make([]*models.AIGuideEssaySession, len(keys))\n\terrs := make([]error, len(keys))\n\tfor i, key := range keys {\n\t\tif err, failed := errByConfig[key.ConfigID]; failed {\n\t\t\terrs[i] = err\n\t\t\tcontinue\n\t\t}\n\t\tfound[i] = sessionsByConfig[key.ConfigID][key.Kaid]\n\t}\n\treturn found, errs"
+            },
+            {
+                "path": "services/ai-guide/resolvers/acls.go",
+                "commit": "dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82",
+                "startLine": 68,
+                "endLine": 131,
+                "url": "https://github.com/Khan/webapp/blob/dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82/services/ai-guide/resolvers/acls.go#L68-L131",
+                "fileSha256": "9bd2e063dda533c992f317b21ff730f1d5f16e0f3c89f81cf1364b54042e56ca",
+                "text": "// isActorCoachOrAdmin returns true if the kaid is the actor,\n// is coached by the actor, or can be administered by the actor.\n// Equivalent to Python's: (is_actor, is_coached_by_actor,\n// is_limited_support_admin_for_user).\n//\n//ka:permission-check // resolvers can use this as their permission check\nfunc isActorCoachOrAdmin(\n\tctx interface {\n\t\tlog.KAContext\n\t\tgqlclient.KAContext\n\t\tweb.AuthedUserContext\n\t},\n\tkaid string,\n) bool {\n\t// Check isActor first to avoid unnecessary permissions lookups.\n\treturn isActor(ctx, kaid) ||\n\t\tisCoachedByActor(ctx, kaid) ||\n\t\tactorIsProgressViewingAdminForUser(ctx, kaid)\n}\n\n// isActorCoachOrAdminBatched: Like the non-batched isActorCoachOrAdmin,\n// returns true if the kaid is the actor, is coached by the actor,\n// or can be administered by the actor.\n//\n// This function passes the given kaid to a loader that batches concurrent\n// coached-by checks.\n// This is useful when you have a caller (likely a gql resolver) that\n// fans out multiple permission checks to resolve data in a list.\n// Example: a teacher is loading an entire classroom's data.\n//\n// If the caller is operating in a context where the larger request is\n// scoped to a single learner's data and concurrent requests are\n// not made, use the non-batched isActorCoachOrAdmin. Otherwise,\n// serial requests will incur unnecessary wait time\n// while they wait for concurrent requests that never arrive.\n//\n//ka:permission-check // resolvers can use this as their permission check\nfunc isActorCoachOrAdminBatched(\n\tctx interface {\n\t\tkacontext.Base\n\t\tlog.KAContext\n\t\tgqlclient.KAContext\n\t\tweb.AuthedUserContext\n\t},\n\tkaid string,\n) bool {\n\t// Check isActor first to avoid unnecessary permissions lookups.\n\tif isActor(ctx, kaid) {\n\t\treturn true\n\t}\n\n\t// Pass coached-by check to loader\n\tcoached, err := essay_feedback_loaders.CoachingLoader(ctx).Load(ctx, kaid)\n\tif err != nil {\n\t\t// Match acl.IsCoachedByActor, which logs and denies rather than\n\t\t// failing the request, leaving the admin check below as the last word.\n\t\tctx.Log().Error(err)\n\t} else if coached {\n\t\treturn true\n\t}\n\n\t// The admin check has no batch form, so it stays per-kaid.\n\t// Runs when the kaid != actor and when actor != kaid's coach.\n\treturn actorIsProgressViewingAdminForUser(ctx, kaid)"
+            },
+            {
+                "path": "services/ai-guide/resolvers/writing_coach_platform_assignment.go",
+                "commit": "dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82",
+                "startLine": 44,
+                "endLine": 75,
+                "url": "https://github.com/Khan/webapp/blob/dd7693df7ec1ed308011b1a0e9c9b0c9831b6d82/services/ai-guide/resolvers/writing_coach_platform_assignment.go#L44-L75",
+                "fileSha256": "092b00f540c9a32ef9ad48806b7dcf27f0a6c4fc81ea7d6a132ef01303bea9c5",
+                "text": "// Resolve the session for the given student and assignable entity\nfunc (r *writingCoachAssignmentStudentDataResolver) Session(\n\tctx context.Context,\n\tobj *graphql.WritingCoachAssignmentStudentData,\n) (*graphql.ActiveEssaySession, error) {\n\tvar ktx interface {\n\t\tkacontext.Base\n\t\tlog.KAContext\n\t\tweb.AuthedUserContext\n\t\tweb.AuthedServiceContext\n\t\tgqlclient.KAContext\n\t} = kacontext.Upgrade(ctx)\n\t// A service-admin query has no logged-in actor.\n\t// If the actor is not a service admin,\n\t// the actor needs to be logged in to continue.\n\tisServiceAdmin := ktx.RequestIsServiceAdminQuery()\n\tif !isServiceAdmin && !acl.IsLoggedIn(ktx, acl.PhantomProhibited) {\n\t\treturn nil, errors.Unauthorized()\n\t}\n\n\t// Using the batched permissions check because the\n\t// GraphQL executor calls this resolver concurrently,\n\t// once per entity.\n\tif !isServiceAdmin && !isActorCoachOrAdminBatched(ktx, obj.Kaid) {\n\t\treturn nil, errors.Unauthorized(\n\t\t\t\"User cannot access this Writing Coach session\",\n\t\t\terrors.Fields{\n\t\t\t\t\"kaid\":                 obj.Kaid,\n\t\t\t\t\"writingCoachConfigId\": obj.AssignableEntityID,\n\t\t\t},\n\t\t)\n\t}"
+            },
+            {
+                "path": "services/ai-guide/resolvers/acls.go",
+                "commit": "a0cf511316541da2c91f36a64d7938913c894ffa",
+                "startLine": 66,
+                "endLine": 85,
+                "url": "https://github.com/Khan/webapp/blob/a0cf511316541da2c91f36a64d7938913c894ffa/services/ai-guide/resolvers/acls.go#L66-L85",
+                "fileSha256": "c3c8a14b28bd756264b31e3ec9ef3a55448195517c4ec193398805c3fafab242",
+                "text": "// isActorCoachOrAdmin returns true if the kaid is the actor,\n// is coached by the actor, or can be administered by the actor.\n// Equivalent to Python's: (is_actor, is_coached_by_actor,\n// is_limited_support_admin_for_user).\n//\n//ka:permission-check // resolvers can use this as their permission check\nfunc isActorCoachOrAdmin(\n\tctx interface {\n\t\tlog.KAContext\n\t\tgqlclient.KAContext\n\t\tweb.AuthedUserContext\n\t},\n\tkaid string,\n) bool {\n\t// Check isActor first to avoid unnecessary permissions lookups.\n\treturn isActor(ctx, kaid) ||\n\t\tisCoachedByActor(ctx, kaid) ||\n\t\tactorIsProgressViewingAdminForUser(ctx, kaid)\n}\n"
+            }
+        ]
+    },
+    "checks": [
+        {
+            "facet": "mainDefect",
+            "surface": "body",
+            "required": [
+                "(?:single|one student).*?(?:fail|error)",
+                "(?:whole roster|every kaid)"
+            ],
+            "forbidden": []
+        },
+        {
+            "facet": "proposedFix",
+            "surface": "body",
+            "required": [
+                "(?:fall.?back|fall back|scop).*(?:per.kaid|per kaid)"
+            ],
+            "forbidden": []
+        },
+        {
+            "facet": "supportingAssertions",
+            "surface": "body",
+            "required": [],
+            "forbidden": [
+                "IsCoachedByActorErr does not exist"
+            ]
+        },
+        {
+            "facet": "visibleConsequence",
+            "surface": "visible",
+            "required": [
+                "(?:den(?:y|ies)|error).*(?:whole roster|every kaid)|whole roster.*fail"
+            ],
+            "forbidden": []
+        }
+    ],
+    "originalPass": {
+        "mainDefect": true,
+        "proposedFix": true,
+        "supportingAssertions": false,
+        "visibleConsequence": true
+    },
+    "control": {
+        "kind": "hand-authored validator output, not a model result",
+        "claims": [
+            {
+                "id": "comment-3925652967",
+                "verification": "confirmed",
+                "confidence": 0.7,
+                "reason": "Supported core concern, corrected only the inaccurate details or visible summary.",
+                "corrected": {
+                    "subject": "The coaching batch can deny the whole roster after one student's lookup fails, so fall back per kaid on error.",
+                    "discussion": "The coaching loader fans a single failed lookup out to every kaid, so one student's transient error can deny the whole roster for a teacher without admin permission. ManyCoachedBy runs one lookup per student, then ManyCoachedByActorErr returns an empty map on an error and the loader marks every key failed. Keep the successful batch path. On batch failure, fall back per kaid using acl.IsCoachedByActorErr and retain each result and error in its own slot. The cached function variable exists in pkg/khan/acl/coaches.go:36-40. This adds calls only on the failure path and cannot repair a service-wide outage.",
+                    "suggestion": "if err != nil {\n    out := make([]bool, len(kaids))\n    errs := make([]error, len(kaids))\n    for i, kaid := range kaids {\n        out[i], errs[i] = acl.IsCoachedByActorErr(ktx, kaid)\n    }\n    return out, errs\n}"
+                }
+            }
+        ]
+    }
+}

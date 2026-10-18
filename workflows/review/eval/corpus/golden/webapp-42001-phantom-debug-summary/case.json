@@ -1,0 +1,48 @@
+{
+    "id": "webapp-42001-phantom-debug-summary",
+    "tags": [
+        "golden",
+        "claim-fidelity"
+    ],
+    "category": "golden",
+    "description": "For a nonempty classroom list and a phantom user whose RequestUser call succeeds, the rejection returns UNAUTHORIZED with debugMessage: null. errorToDebugMessage accepts nil safely, so this is a missing debug reason, not a crash or an authorization bypass.",
+    "changedFiles": [
+        {
+            "path": "services/humanities/resolvers/writing_coach_config.go",
+            "status": "modified"
+        }
+    ],
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "comment-3934967849",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/humanities/resolvers/writing_coach_config.go",
+                    "line": 180,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.7,
+                "evidence_trace": [
+                    "https://github.com/Khan/webapp/blob/5b4a84fbb520c3102467ed549078c72aff3cdd93/services/humanities/resolvers/writing_coach_config.go#L180"
+                ],
+                "failure_scenario": "For a nonempty classroom list and a phantom user whose RequestUser call succeeds, the rejection returns UNAUTHORIZED with debugMessage: null. errorToDebugMessage accepts nil safely, so this is a missing debug reason, not a crash or an authorization bypass.",
+                "producing_hunt": "historical-comment-replay",
+                "model_authored_prose": "`errorToDebugMessage(err)` on line 180 is always passed a nil `err`. Control flow reaches line 175 only when `ktx.RequestUser()` on line 166 returned a nil error (the non-nil case returns at line 169), and `errorToDebugMessage` (line 157) short-circuits with `if err == nil { return nil }`. So every phantom/not-logged-in rejection returns `UNAUTHORIZED` with `debugMessage: null`, discarding the reason \u2014 while the `errors.Unauthorized()` constructed on line 176 for the log line is thrown away instead of being reused for the client-facing debug message. Introduced by this change; the four new tests all authenticate, so none covers this branch.",
+                "summary": "`errorToDebugMessage(err)` is passed a guaranteed-nil `err` in the phantom-user branch.",
+                "suggested_patch": "\tif !acl.IsLoggedIn(ktx, acl.PhantomProhibited) {\n\t\tunauthorizedErr := errors.Unauthorized()\n\t\tktx.Log().Warn(unauthorizedErr)\n\t\treturn _mapErrorToAllClassrooms(\n\t\t\tgraphql.WritingCoachConfigErrorCodeUnauthorized,\n\t\t\t&response,\n\t\t\terrorToDebugMessage(unauthorizedErr),\n\t\t), nil\n\t}"
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "comment-3934967849"
+        ],
+        "postedCommentCount": 1
+    }
+}
