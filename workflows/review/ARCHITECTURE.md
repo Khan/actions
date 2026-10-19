@@ -143,6 +143,12 @@ flowchart TD
   R --> Cache
 ```
 
+### File details
+
+Files are under `/tmp/gh-aw/review/` unless noted. Shapes are abbreviated (`…` = more fields).
+
+**Scripts: what each reads and writes**
+
 | Script | Reads | Writes |
 |---|---|---|
 | `stage-pr.ts` | GitHub API, cache memory | `pr-context.json`, `files.json`, `full.diff`, `threads.json`, `prior-reviews.json`, `provenance.json`, `rereview-plan.json`, … |
@@ -150,11 +156,7 @@ flowchart TD
 | `dispatch.ts` | `routing.json`, `rereview-plan.json`, diffs, `provenance.json`, threads | `dispatch-result.json`, `out/<agent>.json` |
 | `submission.ts` | `dispatch-result.json`, `routing.json`, `rereview-plan.json`, `prior-reviews.json`, cache memory | `submission-plan.json` |
 | `dispatch-gate.ts` | `agent_output.json` (queue), `submission-plan.json`, `out/` | pass, or strips the queue and fails |
-| `cache-record.ts` | `agent_output.json`, `submission-plan.json`, `dispatch-result.json`, `diff-facts.json` | `cache-memory/pr-N.json` |
-
-### Files reference
-
-All under `/tmp/gh-aw/review/` unless noted. Shapes are abbreviated (`…` = more fields).
+| `cache-record.ts` | `agent_output.json`, `submission-plan.json`, `dispatch-result.json`, `diff-facts.json`, `pr-context.json` | `cache-memory/pr-N.json` |
 
 **Staged before the AI starts (`stage-pr.ts`, `router.ts`)**
 
