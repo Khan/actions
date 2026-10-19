@@ -1,7 +1,8 @@
 # Review Bot — Architecture
 
 Part 1 explains the bot in plain terms. Part 2 maps each idea to the files and
-scripts that implement it. Known problems, each with a possible solution, are collected at the end.
+scripts that implement it. The end collects known problems (each with a possible
+solution) and options for moving off gh-aw.
 
 # Part 1 — Overview
 
@@ -277,6 +278,12 @@ sections (~840 lines) share one shape (rules, hunts, repo add-ons, output).
 edited copies of the shared disciplines.
 *Solution:* stage each once to a file, as `disciplines.md` already is.
 
+**Some rule-based steps are still prose for the orchestrator.** The early-exit
+check (Step 2) and choosing team reviewers (Step 8: risky files → owning teams,
+minus teams already requested or already reviewed) are fixed rules the
+orchestrator is asked to follow, unlike the steps already moved into scripts.
+*Solution:* move them into code (see Option A).
+
 ## Stale and misleading text
 
 **Comments describe a removed "agent" dispatch mode.** Only `scripted` exists
@@ -336,6 +343,84 @@ in `routing.json`, and the prompt tells the orchestrator to show them. But
 `submission.ts` (which writes the review body the orchestrator must post
 exactly) doesn't read them.
 *Solution:* confirm, then have `submission.ts` render them.
+
+**The investigation cap depends on the sub-agent asking.** Each sub-agent is
+told to run `investigation-cap.ts request <id>` before every investigation tool
+call; the code only refuses when asked. A sub-agent that skips the call is
+never capped. `dispatch-runner.ts` already uses an SDK hook to force
+`submit_result`.
+*Solution:* enforce the cap the same way, with a hook on each tool call.
+
+---
+
+# Options beyond gh-aw
+
+High-level options, not plans. Today gh-aw provides five things the bot relies on:
+it runs the orchestrator from `review.md`, posts through a separate job holding
+the write token, meters and caps AI spend, keeps cache memory between runs, and
+assembles prompts from the repo's config files. Consumers install the bot by
+importing `review.md`.
+
+## Option A: a deterministic pipeline with no orchestrator
+
+The orchestrator already does little beyond running scripts in order. What it
+still does:
+
+| Orchestrator task | Kind of work | Without an orchestrator |
+|---|---|---|
+| Early-exit check (Step 2: merge commit with an unchanged diff) | fixed rules, written as prose | code |
+| Run `dispatch.ts`, `submission.ts`, `notified.ts`, `cache-record.ts` | sequencing | code |
+| Emit safe outputs exactly as `submission-plan.json` says | copying | code calls the GitHub API |
+| Answer `pendingRiskQuestions` (tighten or loosen?) | judgment | one small sub-agent call |
+| Write `author-disputes.json` from reply chains | judgment | one small sub-agent call |
+| Risks comment and team reviewers (Steps 7–8) | mostly rules in prose | code |
+
+```mermaid
+flowchart LR
+  subgraph Today
+    direction TB
+    S1[setup scripts] --> O[orchestrator<br/>runs scripts, copies plan<br/>into a queue]
+    O --> G[dispatch-gate.ts<br/>checks the copy]
+    G --> P1[posting job]
+  end
+  subgraph OptionA["Option A"]
+    direction TB
+    S2[setup scripts] --> D2[dispatch.ts<br/>+ two small judgment calls]
+    D2 --> SUB[submission.ts]
+    SUB --> P2[post with a<br/>narrowly scoped token]
+  end
+```
+
+**What could be deleted**, because it exists only to manage the orchestrator:
+- `dispatch-gate.ts` and `dispatch-gate-plan.ts` (about 1,300 lines), which check
+  the orchestrator copied the plan faithfully.
+- The 60-minute Bash ceiling and the one-blocking-call rule for `dispatch.ts`.
+- The "died mid-dispatch" fallback comment, and `cache-record.ts` reading the
+  queue to detect that case.
+- The out-of-reach copy of `lib/` for post-agent steps.
+- Most of the orchestrator half of `review.md` (Steps 1–9).
+
+**What would need replacing:** a posting step that keeps write access away from
+the AI steps, a spend cap, storage for PR memory, loading the repo's config
+files into prompts, and a way for consumers to install it (e.g. a reusable
+workflow).
+
+## Option B: run sub-agents on pi instead of the Claude Agent SDK
+
+Sub-agents already run outside gh-aw: `dispatch-runner.ts` starts each one with
+the Claude Agent SDK, adds a custom `submit_result` tool, and uses a hook to force
+it to be called. pi's SDK covers the same ground, plus:
+- **Extensions with tool-call hooks** that can block a call, so limits like the
+  investigation cap run inside the agent instead of relying on it asking.
+- **Many model providers** through one interface.
+
+**Durable sessions (`@earendil-works/pi-durable`, experimental).** It saves every
+turn and tool call to storage and resumes after the process dies. That targets a
+real failure: runs killed at the time limit during claim validation posted
+nothing (run 32418662895), and `dispatch.ts` writes each sub-agent's output to
+`out/` but never reuses it on a rerun. Checkpoints would only help if they
+outlive the job, though (all run state lives in `/tmp` on the runner).
+A cheaper first step is reusing finished `out/` results on retry.
 
 # Next sections (to be written)
 
