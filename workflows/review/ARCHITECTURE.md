@@ -114,8 +114,8 @@ wrote. The one direct call is `stage-pr.ts` running the router's first pass.
 ```mermaid
 flowchart TD
   A["stage-pr.ts<br/><i>runStagePrCli</i>"] -->|PR data, diffs, threads| B
-  B["router.ts<br/><i>route</i>"] -->|routing.json| C
-  C["dispatch.ts<br/><i>runDispatch</i>"] -->|dispatch-result.json| D
+  B["router.ts<br/><i>route</i>"] -->|routing.json:<br/>suggested reviewers + budget| C
+  C["dispatch.ts<br/><i>runDispatch</i><br/>picks final reviewers (computeRoster), runs them"] -->|dispatch-result.json| D
   D["submission.ts<br/><i>runSubmissionCli</i>"] -->|submission-plan.json| E
   E[Lead AI posts the plan] --> F
   F["cache-record.ts"] -->|PR memory| G[(cache)]
@@ -125,8 +125,8 @@ flowchart TD
 | Step | File | Writes |
 |---|---|---|
 | Gather the PR | `stage-pr.ts` (also runs the router once) | `pr-context.json`, `full.diff`, `threads.json`, … |
-| Decide reviewers | `router.ts` | `routing.json` |
-| Find and clean up problems | `dispatch.ts` | `dispatch-result.json` |
+| Suggest reviewers | `router.ts` | `routing.json` |
+| Pick final reviewers, find and clean up problems | `dispatch.ts` (roster from `dispatch-roster.ts`) | `dispatch-result.json` |
 | Pick verdict, write review | `submission.ts` | `submission-plan.json` |
 | Check before posting | `dispatch-gate.ts` | pass/fail (strips the queue on fail) |
 | Remember | `cache-record.ts` | `cache-memory/pr-*.json` |
