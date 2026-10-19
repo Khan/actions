@@ -28,6 +28,8 @@
  * the code under review is synthesised.
  */
 
+import {runIdentity, threadIdentitySegment} from "./foreign-history";
+import type {ReviewerIdentity} from "./foreign-history";
 import {CONTEXT_FOLD_OPEN} from "./render-comment";
 
 /**
@@ -244,8 +246,11 @@ export const renderAttributionFooter = (
     source: string,
     alsoFlaggedBy: readonly AlsoFlagged[] = [],
     canarySha: string | undefined = process.env.REVIEW_CANARY_SHA,
+    identity: ReviewerIdentity | null = runIdentity(),
 ): string =>
-    renderCollapsedFooter(attributionLine(source, alsoFlaggedBy, canarySha));
+    renderCollapsedFooter(
+        attributionLine(source, alsoFlaggedBy, canarySha, identity),
+    );
 
 /**
  * The bare attribution text, without the collapsed-footer wrapper: a
@@ -262,6 +267,7 @@ export const attributionLine = (
     source: string,
     alsoFlaggedBy: readonly AlsoFlagged[] = [],
     canarySha: string | undefined = process.env.REVIEW_CANARY_SHA,
+    identity: ReviewerIdentity | null = runIdentity(),
 ): string => {
     const segments = [`found by ${source}`];
     if (alsoFlaggedBy.length > 0) {
@@ -278,6 +284,9 @@ export const attributionLine = (
     // matches this segment and the version footer's with one predicate.
     if (typeof canarySha === "string" && canarySha !== "") {
         segments.push(canarySegment(canarySha));
+    }
+    if (identity !== null) {
+        segments.push(threadIdentitySegment(identity));
     }
     return segments.join(" | ");
 };

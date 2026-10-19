@@ -270,30 +270,32 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
     it("APPROVE without inline comments", () => {
         expect(
             body({event: "APPROVE", hasInlineComments: false}),
-        ).toMatchInlineSnapshot(
-            `"**✅ Approved** — no blocking issues found."`,
-        );
+        ).toMatchInlineSnapshot(`"**✅ Approved** — nothing blocks."`);
     });
 
     it("a conditional approval names its obligation count, singular and plural", () => {
-        // The one restyled head with a count in it: the approval is
-        // conditional on a separately-posted comment, so the body has to
-        // say so however many obligations rode this run.
-        expect(body({obligationCount: 1})).toMatchInlineSnapshot(
-            `"**✅ Approved** with 1 pre-merge obligation — see the pre-merge obligations comment."`,
-        );
-        expect(body({obligationCount: 3})).toMatchInlineSnapshot(
-            `"**✅ Approved** with 3 pre-merge obligations — see the pre-merge obligations comment."`,
-        );
-        // Inline comments do not empty a conditional head the way they empty
-        // a plain approval's: the obligation pointer is the whole point.
+        // The approval is conditional on a separately-posted comment, so
+        // the body says so under the head however many obligations rode
+        // this run.
+        expect(body({obligationCount: 1})).toMatchInlineSnapshot(`
+          "**✅ Approved** — nothing blocks.
+          Approval is conditional on 1 pre-merge obligation — see the pre-merge obligations comment."
+        `);
+        expect(body({obligationCount: 3})).toMatchInlineSnapshot(`
+          "**✅ Approved** — nothing blocks.
+          Approval is conditional on 3 pre-merge obligations — see the pre-merge obligations comment."
+        `);
         expect(body({obligationCount: 1, hasInlineComments: true})).toContain(
             "1 pre-merge obligation",
         );
     });
 
-    it("APPROVE with inline comments has an empty body (the comments ARE the review)", () => {
-        expect(body({event: "APPROVE", hasInlineComments: true})).toBe("");
+    it("APPROVE with inline comments still leads with the verdict", () => {
+        // Inline comments do not stand in for the head: without it, an
+        // approval with only minor findings posts a body of folds alone.
+        expect(body({event: "APPROVE", hasInlineComments: true})).toBe(
+            "**✅ Approved** — nothing blocks.",
+        );
     });
 
     it("REQUEST_CHANGES always carries the pointer line (GitHub rejects an empty body)", () => {
@@ -360,7 +362,7 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
                 hasInlineComments: true,
                 policyConflicts: [{policy: "p", detail: "d"}],
             }),
-        ).toBe("");
+        ).toBe("**✅ Approved** — nothing blocks.");
     });
 
     it("a comment-less review always has a non-empty body (GitHub requires one)", () => {
@@ -378,7 +380,7 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
         }
     });
 
-    it("skipped-dimension notes form the entire body when the head is empty", () => {
+    it("skipped-dimension notes follow the head when inline comments posted", () => {
         expect(
             body({
                 event: "APPROVE",
@@ -388,7 +390,10 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
                 ],
             }),
         ).toBe(
-            "Note: patterns not assessed this run (pattern-triage output unavailable).",
+            [
+                "**✅ Approved** — nothing blocks.",
+                "Note: patterns not assessed this run (pattern-triage output unavailable).",
+            ].join("\n"),
         );
     });
 
@@ -409,7 +414,7 @@ describe("renderReviewBody — one non-empty line per verdict (+ notes)", () => 
                 ],
             }),
         ).toMatchInlineSnapshot(`
-          "**✅ Approved** — no blocking issues found.
+          "**✅ Approved** — nothing blocks.
           Note: correctness not assessed this run (correctness-reviewer output unavailable).
           Note: claim validation not assessed this run (claim-validator output unavailable)."
         `);
@@ -465,68 +470,13 @@ describe("renderReviewBody — the COMMENT verdict", () => {
     });
 });
 
-describe("renderReviewBody — an approval with medium findings", () => {
-    it("counts one medium posted inline", () => {
-        expect(
-            renderReviewBody({
-                event: "APPROVE",
-                hasInlineComments: true,
-                mediumCount: 1,
-                mediumInlineCount: 1,
-            }),
-        ).toBe(
-            "**✅ Approved** — nothing blocks; 1 finding worth fixing before merge (see inline comments).",
-        );
-    });
-
-    it("counts several mediums collapsed into the fold", () => {
-        expect(
-            renderReviewBody({
-                event: "APPROVE",
-                hasInlineComments: false,
-                mediumCount: 2,
-                mediumInlineCount: 0,
-            }),
-        ).toBe(
-            "**✅ Approved** — nothing blocks; 2 findings worth fixing before merge (see the observations below).",
-        );
-    });
-
-    it("points at both surfaces when mediums split across them", () => {
-        expect(
-            renderReviewBody({
-                event: "APPROVE",
-                hasInlineComments: true,
-                mediumCount: 3,
-                mediumInlineCount: 2,
-            }),
-        ).toBe(
-            "**✅ Approved** — nothing blocks; 3 findings worth fixing before merge (see inline comments and the observations below).",
-        );
-    });
-
-    it("appends the medium clause to a conditional approval", () => {
-        expect(
-            renderReviewBody({
-                event: "APPROVE",
-                hasInlineComments: true,
-                obligationCount: 1,
-                mediumCount: 1,
-                mediumInlineCount: 1,
-            }),
-        ).toBe(
-            "**✅ Approved** with 1 pre-merge obligation — see the pre-merge obligations comment. Nothing else blocks; 1 finding worth fixing before merge (see inline comments).",
-        );
-    });
-
-    it("keeps the empty head with inline comments when no medium posted", () => {
-        expect(
-            renderReviewBody({
-                event: "APPROVE",
-                hasInlineComments: true,
-                mediumCount: 0,
-            }),
-        ).toBe("");
+describe("renderReviewBody — every approval reads nothing blocks", () => {
+    it("with or without inline comments", () => {
+        for (const hasInlineComments of [false, true]) {
+            expect(
+                renderReviewBody({event: "APPROVE", hasInlineComments}),
+            ).toBe("**✅ Approved** — nothing blocks.");
+        }
     });
 });
 

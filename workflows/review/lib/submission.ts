@@ -39,24 +39,20 @@
  *     fed from the dispatcher's `skippedDimensions`). A hold is not a
  *     review event: the plan's body posts as one standalone PR comment,
  *     nothing else queues, and no fingerprint stamp is written, so the
- *     next run reviews in full. The production shape this closes:
- *     Khan/actions#328's re-run (31124365377 attempt 2), where every core
- *     lens died on an API auth error and the run still submitted
- *     "Approved — no blocking issues found" over seven "not assessed"
- *     note lines.
+ *     next run reviews in full. This closes Khan/actions#328's re-run,
+ *     where every core lens died on an auth error and the run still approved.
  *   - The reduced-depth flip rule: at flip-gated/fast depth over a prior
  *     REQUEST_CHANGES stamp, `rereview.json`'s keptBlockingCount floors the
  *     verdict at REQUEST_CHANGES.
  *   - Full-roster approval and reduced-depth clearance: submission-clearance.ts.
  *
- * Body rules encoded (review.md Step 6): the verdict head (empty-body
- * APPROVE with comments; the fixed REQUEST_CHANGES line), the code-rendered
- * accountability section spliced verbatim, one note line per shed / skipped
- * dimension / depth reduction (the dispatcher already rendered those), any
- * PR-level claims folded into the body (the inline-comment safe output needs
- * a path and line), and ONE collapsed `review details` fold as the final
- * block, carrying the observations, the version/config line, and the
- * fingerprint stamp line (sanitizer-surviving).
+ * Body rules encoded (review.md Step 6): the always-visible verdict head,
+ * the code-rendered accountability section spliced verbatim, one note line
+ * per shed / skipped dimension / depth reduction (the dispatcher already
+ * rendered those), any PR-level claims folded into the body (the
+ * inline-comment safe output needs a path and line), and ONE collapsed
+ * `review details` fold as the final block: the observations, the
+ * version/config line, and the fingerprint stamp line (sanitizer-surviving).
  *
  * Determinism boundary: pure composition of staged files through the same
  * lib functions the eval runner uses; no model call, no prose about the code
@@ -322,6 +318,7 @@ export const runSubmissionCli = (
               noteLines?: unknown;
               reconciliation?: {resolve?: unknown; skipLines?: unknown};
               depth?: unknown;
+              escalatedFrom?: unknown;
               threadSuppressions?: unknown;
               riskFiles?: unknown;
               patterns?: unknown;
@@ -390,8 +387,12 @@ export const runSubmissionCli = (
     // revisit is to key on plan presence, not to widen this condition
     // quietly — that trade (filtering a run built on distrusted state)
     // deserves its own change and its own eval.
+    // A clearance escalation (dispatch-escalation.ts) re-reviews code a full
+    // round already reviewed, so it posts blocking findings only, whatever
+    // the modifier says.
     const blockingOnly =
-        depth !== "full" && routing?.reReviewBlockingOnly === true;
+        dispatch.escalatedFrom === "fast" ||
+        (depth !== "full" && routing?.reReviewBlockingOnly === true);
     // The `blocking-medium` sibling modifier: same reduced surface, but
     // medium-importance claims keep posting inline (spending the
     // non-blocking budget) while minor claims collapse. Same executed-depth
@@ -494,9 +495,18 @@ export const runSubmissionCli = (
                   typeof (entry as {body?: unknown}).body === "string",
           )
         : [];
+    const planReasons = (
+        readJson(fs, `${REVIEW_DIR}/rereview-plan.json`) as
+            | {reasons?: unknown}
+            | undefined
+    )?.reasons;
+    const foreignHistory =
+        Array.isArray(planReasons) && planReasons.includes("foreign-history");
     const priorStamp =
         findLatestStamp(priors) ??
-        stampFromCacheMemory(readCacheMemoryRecord(fs));
+        (foreignHistory
+            ? null
+            : stampFromCacheMemory(readCacheMemoryRecord(fs)));
 
     // The reduced-depth flip floor (Step 4): only over a prior
     // REQUEST_CHANGES stamp at flip-gated/fast depth.
@@ -613,6 +623,7 @@ export const runSubmissionCli = (
     const depthNotes = renderDepthNotes(plan, depth, {
         blockingOnly,
         blockingMedium,
+        escalated: dispatch.escalatedFrom === "fast",
     });
 
     // The hold path (computeVerdict's core-dimension gate): a run whose
@@ -876,10 +887,6 @@ export const runSubmissionCli = (
         event,
         hasInlineComments: inline.length > 0,
         rereviewSection: rereview.section,
-        mediumCount,
-        mediumInlineCount: inlineList.filter(
-            (claim) => claim.importance === "medium",
-        ).length,
         approveDemoted,
         hasBodyFindings: hasCollapsedSection || prLevelLines.length > 0,
     });

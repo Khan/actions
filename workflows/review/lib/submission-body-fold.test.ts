@@ -1,6 +1,7 @@
 import {describe, it, expect} from "vitest";
 
 import {renderCollapsedFooter, stripFooters} from "./attribution";
+import {STAMP_MARKER} from "./rereview-mode";
 import {runSubmissionCli, type SubmissionFs} from "./submission";
 
 /**
@@ -104,6 +105,24 @@ describe("the fold's content blocks the submission skips", () => {
         expect(plan.comments).toEqual([]);
         expect(plan.body).toContain("**Lower-confidence observations (1):**");
         expect(plan.body).toContain("`a.ts:2` thought (non-blocking): a hunch");
+        expect(plan.skipSubmission).toBe(false);
+    });
+
+    it("refuses the redundant-approval skip when inline comments posted", () => {
+        // The approval head is the same with or without inline comments, so
+        // the core body equals the bare approve line here and the inline
+        // count is the only thing holding the skip off.
+        const plan = runSubmissionCli(
+            makeFakeFs({
+                ...staged({
+                    depth: "full",
+                    claims: [claim({label: "suggestion (non-blocking)"})],
+                }),
+                ...priorApprove(),
+            }),
+        );
+        expect(plan.event).toBe("APPROVE");
+        expect(plan.comments).toHaveLength(1);
         expect(plan.skipSubmission).toBe(false);
     });
 
@@ -230,5 +249,58 @@ describe("the review body's review-details fold", () => {
                 ].join("\n"),
             ).trim(),
         ).toBe("Body.");
+    });
+});
+
+describe("the approval's visible verdict head", () => {
+    const head = (body: string) => body.split("\n")[0];
+
+    it("leads a minor-findings approval above the fold", () => {
+        const plan = runSubmissionCli(
+            makeFakeFs(
+                staged({
+                    depth: "full",
+                    claims: [claim({label: "suggestion (non-blocking)"})],
+                }),
+            ),
+        );
+        expect(plan.comments).toHaveLength(1);
+        expect(head(plan.body)).toBe("**✅ Approved** — nothing blocks.");
+        expect(plan.body).toContain(STAMP_MARKER);
+    });
+
+    it("leads a collapsed-only approval above the fold's observations", () => {
+        const body = runSubmissionCli(
+            makeFakeFs(staged({depth: "full", claims: [weak()]})),
+        ).body;
+        expect(head(body)).toBe("**✅ Approved** — nothing blocks.");
+        expect(body).toContain("`a.ts:2` thought (non-blocking): a hunch");
+    });
+});
+
+describe("foreign reviewer history", () => {
+    const run = (reasons: string[]) => {
+        const files = {
+            ...staged({depth: "full", claims: []}),
+            ...priorApprove(),
+        };
+        files[`${REVIEW}/rereview-plan.json`] = JSON.stringify({
+            depth: "full",
+            mode: "fast",
+            reasons,
+            stampAnchorDraft: false,
+            stampHunks: {},
+        });
+        return runSubmissionCli(makeFakeFs(files));
+    };
+
+    it("skips a bare re-approval over this reviewer's own cached APPROVE", () => {
+        expect(run(["mode-full"]).skipSubmission).toBe(true);
+    });
+
+    it("never reads another reviewer's cached APPROVE as its own", () => {
+        const plan = run(["foreign-history"]);
+        expect(plan.event).toBe("APPROVE");
+        expect(plan.skipSubmission).toBe(false);
     });
 });

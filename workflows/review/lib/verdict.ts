@@ -115,8 +115,7 @@ export type VerdictInput = {
     /**
      * How many posted claims carry the medium importance tier (post-veto;
      * the count the plan's notes record). Recorded as a reason only: a
-     * medium never blocks, so it never changes the event; the approval
-     * head counts it instead. Absent means zero.
+     * medium never blocks, so it never changes the event. Absent means zero.
      */
     mediumCount?: number;
     /**
@@ -169,8 +168,7 @@ export const DEFAULT_BLOCKING_THRESHOLD = 1;
  *      anchoring a reduced re-review on a partial assessment; medium
  *      findings still reach the author as folded claim lines in the hold
  *      comment.
- *   3. Otherwise -> APPROVE, medium findings included: they post, and the
- *      approval head counts them.
+ *   3. Otherwise -> APPROVE, medium findings included: they post.
  *
  * The hold therefore only ever replaces what would otherwise have been an
  * auto-approval; it never sits in front of blocking feedback.

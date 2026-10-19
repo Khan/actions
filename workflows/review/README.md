@@ -74,11 +74,13 @@ read-only **sub-agents** (it makes every GitHub and comment call itself):
 
 The workflow then posts the per-line Conventional Comments that survived validation
 and submits an approve or request-changes review: changes are requested iff a
-blocking finding survived, and otherwise it approves, with the approval head
-counting any medium-importance findings (worth fixing before merge, never
-blocking). A reduced-depth round whose would-be approval needs a full roster
-submits a comment instead. On approval it also posts the risk/patterns summary
-and requests the owning teams. The config files below feed these sub-agents.
+blocking finding survived, and otherwise it approves. Every approval opens with
+the same visible verdict line, "nothing blocks."; medium-importance findings
+(worth fixing before merge, never blocking) post inline ahead of minor ones
+rather than being counted in that line. A reduced-depth round whose would-be
+approval needs a full roster submits a comment instead. On approval it also
+posts the risk/patterns summary and requests the owning teams. The config
+files below feed these sub-agents.
 
 A mechanical gate and a budget guardrail sit between the reviewers and the PR. The
 **change-provenance gate** (enforced in code against the diff's parsed changed-line
@@ -611,7 +613,33 @@ everything, whatever the mode:
 | `full` | The whole roster over the whole diff (today's behavior). **Default.** | Until the live A/B has priced a cheaper mode for the repo. |
 | `scoped` | The whole roster, staged only the hunks that are new since the last fully-reviewed fingerprint (`scoped.diff`); comments stay scoped to those hunks. | The recommended first step down: measured lifecycles caught fresh seeded defects on re-review pushes, which a reconcile-only path would miss. |
 | `flip-gated` | Thread reconciliation plus the correctness pass over the new hunks. Reduced depths never approve (approval requires a full-roster round): a standing REQUEST_CHANGES whose blocking objections are all resolved is cleared by dismissing it, and any validated blocking finding from the pass vetoes that clearance. | Cheap re-reviews that still cannot clear a standing block over a fresh validated defect. |
-| `fast` | Thread reconciliation only. | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
+| `fast` | Thread reconciliation only, unless that clears the block (see the clearance escalation below). | Maximum savings; fresh code on a re-push is guarded only by the tripwire below. |
+
+**The clearance escalation.** A `fast` round on a PR, draft or ready, whose own
+REQUEST_CHANGES still stands runs the thread reconciler first. When the
+reconciler resolves every blocking thread, or when no bot thread is left open
+because a person resolved them all, the same run continues as a `full` round
+over the whole diff (plan reason `clearance-escalation`, rewritten into
+`rereview-plan.json`; `lib/dispatch-escalation.ts`). That round can approve,
+so the author gets the approval their fix earned, along with the guidance
+comment a first full review would post, and on a ready PR the owning-team
+requests (on a draft, teams are requested when the PR is published). It posts
+blocking findings only: the code under it was already fully reviewed, and a
+new blocker in the fix still requests changes. The full round re-judges the whole diff, so an
+issue behind a wrongly resolved thread is found again and blocks. When any
+blocking thread is kept, unaccounted for, or the reconciler output is
+unusable, or the thread staging is missing, the round stays `fast`. Either way
+the clearance needs positive evidence: at least one blocking thread actually
+cleared (by the reconciler this round, or by a person), and no pr-level
+blocking claim in the latest REQUEST_CHANGES body. A pr-level claim has no
+thread to resolve, so a block it holds never escalates. If the escalated round loses its correctness or skill pass (which
+would otherwise hold it and post nothing), the dispatcher restores the fast
+plan, and the round dismisses the block as before (unless the surviving pass
+found a new blocker, which requests changes), with a note saying why.
+A draft escalates too, so an author can have the approval before publishing;
+its stamp records the draft anchor, so the ready-for-review guard still
+applies on publish. Canary runs never escalate. `flip-gated` does not
+escalate.
 
 The dial governs push-shaped triggers. A bare `/review` comment a human posts
 on a consumer that keeps the comment trigger plans `full` (reason
@@ -664,6 +692,29 @@ Three guards keep the cheaper modes honest (`lib/rereview-mode.ts`, deterministi
   rewrite-after-approval and sparse-PR-then-payload
   (`eval/lifecycle/`, replayed in `eval/lifecycle.test.ts`).
 
+**Another reviewer's history** (`lib/foreign-history.ts`). Every install
+posts as the same bot account, so a PR that moves between installs (a beta
+and a stable install side by side) or across a major release would otherwise
+read the other reviewer's reviews, fingerprint, and threads as its own:
+anchor a cheap round on a fingerprint it never took, resolve threads it
+never opened, dismiss a block it never raised. Staging compares the newest
+bot review's footer with this run's. A different install, a different major
+version, or a footer that doesn't parse (including every review posted
+before the `install` segment existed) makes the history foreign, and the run
+stages a first encounter: no prior reviews, no cache-memory anchor, and a
+full review (plan reason `foreign-history`). Threads are judged
+one by one: every inline comment's attribution line carries
+`install <workflow>@v<major>`, and a bot thread is this reviewer's own only
+when its opening comment names this install and major. That holds on every
+run, not just the first, so after its own full review this reviewer still
+never adopts the other one's threads (or any thread posted before the segment
+existed). Those threads go in neither partition: never resolved, never
+counted toward the verdict, and never `skipLines`, so the full review can
+re-flag a defect that is still there. A human closes them. Its standing
+request for changes clears when this reviewer approves, which GitHub does
+for the shared account. A minor or patch bump of the same install keeps its
+history. A major bump costs one full review per open PR, at its next push.
+
 **The `blocking-only` modifier** (`re-review scoped blocking-only`) composes
 with any mode: the depth's roster and staging are unchanged, but a repeat
 review posts only blocking findings inline; validated non-blocking findings
@@ -671,7 +722,9 @@ collapse to one line each in a `<details>` block in the review body, and the
 depth note names the modifier. It applies exactly when the run executes at a
 reduced depth, so the first full review of a ready PR, a divergence-tripwire
 re-arm, and every guard that resolves to `full` still post everything (which
-is also why `full blocking-only` warns: it can never apply). The verdict is
+is also why `full blocking-only` warns: it can never apply). The one full-depth
+round that posts blocking-only is the clearance escalation, which the
+dispatcher arms whatever the modifier says. The verdict is
 computed from every validated claim either way, so the modifier can never
 flip an outcome; it only moves non-blocking feedback off the inline surface.
 Use it when re-review chatter is the complaint but whole-change coverage
@@ -1063,10 +1116,13 @@ comment, which has no tail fold to ride, ends with the standalone wrapped block:
 
 ```
 <details><summary><sub>review details</sub></summary>
-<sub>review-v<major>.<minor>.<patch> | schema <n> | depth <depth> | re-review <mode> [blocking-only|blocking-medium] | enable <reviewer,...> | non-blocking-budget <n></sub>
+<sub>review-v<major>.<minor>.<patch> | install <workflow> | schema <n> | depth <depth> | re-review <mode> [blocking-only|blocking-medium] | enable <reviewer,...> | non-blocking-budget <n></sub>
 </details>
 ```
 
+`install` is the workflow file that ran (`review`, `review-beta`, from
+`GITHUB_WORKFLOW_REF`), which the next run reads to tell this reviewer's
+history from another install's (see "Another reviewer's history" above);
 `schema` is the finding-schema version (`FINDING_SCHEMA_VERSION` in
 `lib/finding-schema.ts`) the run was on; `depth` is the EXECUTED re-review depth;
 the `re-review`, `enable`, and `non-blocking-budget` segments echo the repo's
