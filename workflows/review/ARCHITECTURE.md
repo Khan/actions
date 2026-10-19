@@ -116,30 +116,30 @@ Scripts are boxes; files are rounded. Only the main files are shown.
 ```mermaid
 flowchart TD
   GH[(GitHub API)] --> A
-  Repo[(Repo checkout:<br/>ROUTING, REVIEWERS,<br/>.gitattributes)] --> B
-  Cache[(cache-memory/<br/>pr-N.json)] --> A
+  Repo[(".github/aw/review/ROUTING<br/>.github/REVIEWERS<br/>.gitattributes")] --> B
+  Cache[("cache-memory/pr-N.json")] --> A
 
-  A["stage-pr.ts"] --> F1(["pr-context.json · files.json<br/>full.diff · threads.json<br/>prior-reviews.json"])
-  F1 --> B["router.ts<br/>(called by stage-pr.ts)"]
-  B --> F2(["routing.json<br/>suggested reviewers + budget"])
+  A["stage-pr.ts"] --> F1(["pr-context.json<br/>files.json<br/>full.diff<br/>threads.json<br/>prior-reviews.json<br/>diff-facts.json"])
+  F1 --> B["router.ts"]
+  B --> F2(["routing.json"])
   F1 --> A2["stage-pr.ts (cont.)"]
   F2 --> A2
-  A2 --> F3(["provenance.json<br/>stripped diffs<br/>rereview-plan.json"])
+  A2 --> F3(["provenance.json<br/>full-stripped.diff<br/>full-stripped-annotated.diff<br/>rereview-plan.json"])
 
-  F1 & F2 & F3 --> C["dispatch.ts<br/>picks final reviewers, runs them"]
+  F1 & F2 & F3 --> C["dispatch.ts"]
   C --> F4(["dispatch-result.json<br/>out/&lt;agent&gt;.json"])
 
   F4 --> D["submission.ts"]
   Cache --> D
   D --> F5(["submission-plan.json"])
 
-  F5 --> E["Lead AI queues<br/>safe outputs"]
-  E --> Q(["agent_output.json<br/>(the queue)"])
+  F5 --> E["Lead AI"]
+  E --> Q(["agent_output.json"])
 
   Q & F5 --> H["dispatch-gate.ts"]
   H --> HV{"queue matches plan?"}
 
-  Q & F4 & F5 --> R["cache-record.ts"]
+  F1 & Q & F4 & F5 --> R["cache-record.ts"]
   R --> Cache
 ```
 
