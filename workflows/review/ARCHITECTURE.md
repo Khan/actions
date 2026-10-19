@@ -1,7 +1,7 @@
 # Review Bot — Architecture
 
 Part 1 explains the bot in plain terms. Part 2 maps each idea to the files and
-scripts that implement it. Known debt and open questions are collected at the end.
+scripts that implement it. Known problems, each with a possible solution, are collected at the end.
 
 # Part 1 — Overview
 
@@ -241,38 +241,59 @@ flowchart LR
 The strictness and severity rows are instructions in the prompts, not checks in
 code. `lens-payloads.ts` flags lens files that no reviewer will ever load.
 
-### Room to consolidate
-
-- **Lens files and skills overlap.** Both are repo-written rules for a domain;
-  they differ only in how strictly they're applied. Lens files could become skills
-  tagged with a specialist, giving the repo one place for rules.
-- **Specialist rules could ship as built-in skills.** The bot's own domain rules
-  could use the same format as the repo's, with one loading path and one strictness model.
-- **The skills index is pasted into 13 prompts.** It could be staged once, as
-  `disciplines.md` already is.
-- **The disciplines text is still copied.** Specialists share one copy, but the
-  whole-change reviewers (e.g. `skill-auditor`) each carry their own edited copy.
-- **The specialist sections all have the same shape** (rules, hunts, repo add-ons,
-  output), so the 11 specialist sections (~840 lines) could be generated from data
-  instead of near-duplicate prose.
-
 ---
 
-# Tech debt and open questions
+# Problems and possible solutions
 
-## Known messiness
+Each problem is checked against the code; solutions are directions, not designs.
 
-- Only one way of running the specialists exists in code ("scripted"), but comments still describe a removed "agent" mode.
-- All specialist instructions live in one very large file (~3,800 lines).
-- Code comments often record history and past incidents rather than explaining the design.
-- See 2.2 for overlap between the ways rules reach reviewers.
+## Rules reach reviewers in too many ways (see 2.2)
 
-## Open questions
+**Lens files hold codebase knowledge only the reviewer can see.** They are
+pasted into one specialist's prompt, but their content is useful to anyone
+writing code. Webapp's only lens file, `lenses/security-auth.md`, lists
+trust-boundary rules with file pointers (which request headers may be
+trusted, how task-only routes must be gated).
+*Solution:* move lens content into the repo's real skills and retire lens files.
+Note this makes the rules stricter: skill rules must be quoted exactly to count.
 
-- Lens-file and ROUTING warnings land in `routing.json`, and the prompt tells the
-  orchestrator to show them on the review. But `submission.ts` (which writes the review
-  body the orchestrator must post exactly) doesn't appear to read them, so they may
-  never reach the PR.
+**The skills index duplicates the skills.** `skills.md` repeats each skill's path and adds
+bot-only "evaluate when" triggers; the skills themselves (webapp's
+`.claude/skills/`, also linked as `.agents/skills`) already describe when they apply.
+*Solution:* pick skills from each skill file's own description and drop the index.
+
+**Built-in specialist rules use a different format from skills.**
+*Solution:* ship them as built-in skills, so there is one format, one way of
+loading rules, and one level of strictness.
+
+## The prompt file is large and repetitive
+
+**All instructions live in one ~3,800-line `review.md`.** The 11 specialist
+sections (~840 lines) share one shape (rules, hunts, repo add-ons, output).
+*Solution:* generate specialist sections from data.
+
+**The same text is pasted in many places.** The skills index is imported into
+13 prompts, and whole-change reviewers (e.g. `skill-auditor`) carry their own
+edited copies of the shared disciplines.
+*Solution:* stage each once to a file, as `disciplines.md` already is.
+
+## Stale and misleading text
+
+**Comments describe a removed "agent" dispatch mode.** Only `scripted` exists
+in code.
+*Solution:* delete the references.
+
+**Code comments mostly record history and past incidents** rather than the
+current design.
+*Solution:* move history to the changelog; keep comments about current behaviour.
+
+## Possible bugs
+
+**Config warnings may never reach the PR.** Lens-file and ROUTING warnings land
+in `routing.json`, and the prompt tells the orchestrator to show them. But
+`submission.ts` (which writes the review body the orchestrator must post
+exactly) doesn't read them.
+*Solution:* confirm, then have `submission.ts` render them.
 
 # Next sections (to be written)
 
