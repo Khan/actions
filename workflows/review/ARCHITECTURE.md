@@ -140,7 +140,7 @@ flowchart TD
     R["cache-record.ts"]
   end
   F1 & F2 & F3 --> C
-  C --> F4(["dispatch-result.json<br/>out/&lt;agent&gt;.json"])
+  C --> F4(["dispatch-result.json<br/>out/#lt;agent#gt;.json"])
   F4 --> D
   Cache --> D
   D --> F5(["submission-plan.json"])
@@ -215,7 +215,7 @@ flowchart LR
   end
   subgraph Repo["Owned by the repo (.github/aw/review/)"]
     S[skills.md index<br/>+ the skill files it lists]
-    L["lenses/&lt;lens&gt;.md<br/>extra rules for one specialist"]
+    L["lenses/#lt;lens#gt;.md<br/>extra rules for one specialist"]
     O[risk-classification.md,<br/>ci-tooling.md, …]
   end
   D --> P[Specialist prompt]
