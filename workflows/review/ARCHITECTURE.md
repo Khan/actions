@@ -1,6 +1,11 @@
 # Review Bot — Architecture
 
-## 1. What it does
+Part 1 explains the bot in plain terms. Part 2 maps each idea to the files and
+scripts that implement it. Known debt and open questions are collected at the end.
+
+# Part 1 — Overview
+
+## 1.1 What it does
 
 On every push to a pull request, the bot reviews the change and responds the way a
 human reviewer would: inline comments, then either an approval or a request for changes.
@@ -13,7 +18,7 @@ flowchart LR
   B --> E[On approval: risk summary<br/>and team reviewers requested]
 ```
 
-## 2. The core idea: a script runs the review, AI finds the bugs
+## 1.2 The core idea: a script runs the review, AI finds the bugs
 
 Most of the bot is ordinary code that follows fixed rules. AI is used only where
 judgment is needed: reading code and spotting problems. A lead AI coordinates
@@ -32,7 +37,7 @@ flowchart LR
   R --> F --> V
 ```
 
-## 3. One review, start to finish
+## 1.3 One review, start to finish
 
 ```mermaid
 flowchart TD
@@ -44,7 +49,7 @@ flowchart TD
   F --> G[Remember what was reviewed]
 ```
 
-## 4. Who reviews what
+## 1.4 Who reviews what
 
 A change only gets the specialists it needs. Each repo writes its own rules
 for which files need which specialists and how risky each area is.
@@ -57,7 +62,7 @@ flowchart LR
   Rules --> Teams[Owning teams<br/>to request as reviewers]
 ```
 
-## 5. Safety: the AI cannot post directly
+## 1.5 Safety: the AI cannot post directly
 
 The AI never has permission to write to GitHub. It can only *queue* actions.
 A separate check compares that queue with what the code decided, and a separate
@@ -71,7 +76,7 @@ flowchart LR
   Check -->|no| Block[Nothing is posted,<br/>run fails]
 ```
 
-## 6. Later pushes are reviewed more cheaply
+## 1.6 Later pushes are reviewed more cheaply
 
 The bot remembers what it has already reviewed. By default every push gets a full
 review; a repo can opt in to cheaper modes that look at only the new parts. Either
@@ -86,20 +91,14 @@ flowchart LR
   Partial --> Old
 ```
 
-## 7. Where things live
+## 1.7 Where things live
 
 | Piece | Where |
 |---|---|
 | Instructions for the lead AI and the specialists | `review.md` (copied into each repo) |
 | The code that runs the review | `lib/` in this repo, fetched at run time |
-| Per-repo rules (routing, teams) | the repo using the bot |
+| Per-repo rules (routing, teams, skills, extra specialist rules) | the repo using the bot, mostly under `.github/aw/review/` |
 | Testing and measuring the bot's quality | `eval/` (never runs during a real review) |
-
-## 8. Known messiness
-
-- Only one way of running the specialists exists in code ("scripted"), but comments still describe a removed "agent" mode.
-- All specialist instructions live in one very large file (~3,800 lines).
-- Code comments often record history and past incidents rather than explaining the design.
 
 ---
 
@@ -107,11 +106,14 @@ flowchart LR
 
 ## 2.1 One review, mapped to files
 
-Each step from section 3 is one script in `lib/`. The scripts pass work along as
-files on disk (under `/tmp/gh-aw/review/`). The one direct call is `stage-pr.ts`
-running the router's first pass.
+The steps in 1.3 run as scripts in `lib/`, in three phases: setup steps before the
+lead AI starts, scripts the lead AI runs (as instructed by `review.md`), and checks
+after it finishes. The scripts pass work along as files on disk (under
+`/tmp/gh-aw/review/`). The one direct call is `stage-pr.ts` running the router's
+first pass.
 
-Scripts are boxes; files are rounded. Only the main files are shown.
+Scripts are boxes; files are rounded. Only the main files are shown, and two
+smaller after-AI scripts (`cost-report-cli.ts`, `dismiss-review.ts`) are left out.
 
 ```mermaid
 flowchart TD
@@ -119,28 +121,38 @@ flowchart TD
   Repo[(".github/aw/review/ROUTING<br/>.github/REVIEWERS<br/>.gitattributes")] --> B
   Cache[("cache-memory/pr-N.json")] --> A
 
-  A["stage-pr.ts"] --> F1(["pr-context.json<br/>files.json<br/>full.diff<br/>threads.json<br/>prior-reviews.json<br/>diff-facts.json"])
-  F1 --> B["router.ts"]
+  subgraph Before["Before the AI (setup steps)"]
+    A["stage-pr.ts"]
+    B["router.ts"]
+  end
+  A --> F1(["pr-context.json<br/>files.json<br/>full.diff<br/>threads.json<br/>prior-reviews.json<br/>diff-facts.json"])
+  F1 --> B
   B --> F2(["routing.json"])
-  F1 --> A2["stage-pr.ts (cont.)"]
-  F2 --> A2
-  A2 --> F3(["provenance.json<br/>full-stripped.diff<br/>full-stripped-annotated.diff<br/>rereview-plan.json"])
+  F2 --> A
+  A --> F3(["provenance.json<br/>full-stripped.diff<br/>full-stripped-annotated.diff<br/>rereview-plan.json"])
 
-  F1 & F2 & F3 --> C["dispatch.ts"]
+  subgraph During["Run by the lead AI"]
+    C["dispatch.ts"]
+    D["submission.ts"]
+    E["review.md"]
+    R["cache-record.ts"]
+  end
+  F1 & F2 & F3 --> C
   C --> F4(["dispatch-result.json<br/>out/&lt;agent&gt;.json"])
-
-  F4 --> D["submission.ts"]
+  F4 --> D
   Cache --> D
   D --> F5(["submission-plan.json"])
-
-  F5 --> E["Lead AI"]
+  F5 --> E
   E --> Q(["agent_output.json"])
-
-  Q & F5 --> H["dispatch-gate.ts"]
-  H --> HV{"queue matches plan?"}
-
-  F1 & Q & F4 & F5 --> R["cache-record.ts"]
+  F1 & Q & F4 & F5 --> R
   R --> Cache
+
+  subgraph After["After the AI (checks)"]
+    H["dispatch-gate.ts"]
+  end
+  Q & F5 --> H
+  H -->|queue matches plan| Post[safe_outputs job<br/>posts to GitHub]
+  H -->|mismatch| Strip[queue emptied,<br/>run fails]
 ```
 
 ### File details
@@ -241,14 +253,25 @@ code. `lens-payloads.ts` flags lens files that no reviewer will ever load.
   output), so the 11 specialist sections (~840 lines) could be generated from data
   instead of near-duplicate prose.
 
-### Open questions
+---
+
+# Tech debt and open questions
+
+## Known messiness
+
+- Only one way of running the specialists exists in code ("scripted"), but comments still describe a removed "agent" mode.
+- All specialist instructions live in one very large file (~3,800 lines).
+- Code comments often record history and past incidents rather than explaining the design.
+- See 2.2 for overlap between the ways rules reach reviewers.
+
+## Open questions
 
 - Lens-file and ROUTING warnings land in `routing.json`, and the prompt tells the
   lead AI to show them on the review. But `submission.ts` (which writes the review
   body the lead AI must post exactly) doesn't appear to read them, so they may
   never reach the PR.
 
-## Next sections (to be written)
+# Next sections (to be written)
 
-Each will go one level deeper into a section above: preparing the PR, routing,
+Each will go one level deeper into Part 1: preparing the PR, routing,
 the review pipeline, verdict rules, follow-up reviews, and safety checks.
