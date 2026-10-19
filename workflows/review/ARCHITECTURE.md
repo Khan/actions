@@ -287,6 +287,48 @@ in code.
 current design.
 *Solution:* move history to the changelog; keep comments about current behaviour.
 
+## Code structure
+
+**Shared files have no shared types.** Scripts hand off through JSON files, and
+the writer usually exports a type (`RoutingJson` in `router.ts`,
+`DispatchResult` in `dispatch.ts`), but no other script imports it. Each
+reader instead casts the file to its own partial shape, inline. For example,
+`submission.ts`, `version-footer.ts` and `cache-record.ts` each declare their own
+fragment of `dispatch-result.json`. A writer can rename a field without the
+compiler noticing any reader.
+*Solution:* one module per handoff file that owns its path, type and reader;
+every script imports it.
+
+**Every script rebuilds the same plumbing.** `/tmp/gh-aw/review` is defined
+separately in 16 files, `readJson` in 5, and each CLI has its own filesystem type
+(`DispatchFs`, `SubmissionFs`, `StagePrFs`, …).
+*Solution:* one shared file-access module.
+
+**Files are opened far from the step that owns them.** `routing.json` is opened
+by path in 9 modules, `rereview-plan.json` in 8, `dispatch-result.json` in 6,
+including helpers like `version-footer.ts` and `investigation-cap.ts`. So any
+module can quietly depend on any step's output.
+*Solution:* read each file once per script and pass the values down as arguments.
+
+**The review depth has two sources of truth.** `rereview-plan.json` holds it, but
+`dispatch.ts` can rewrite that plan (escalation) and also records the depth in
+`dispatch-result.json`. Later modules read it from one or the other, e.g.
+`version-footer.ts` reads it from `dispatch-result.json`.
+*Solution:* make one file authoritative and have every reader use it.
+
+**Helpers live in whichever module needed them first.** Comment-label parsing
+(`isBlockingLabel` in `render-comment.ts`, `parseLeadingLabel` in `rereview.ts`)
+is imported by `dispatch-gate.ts` and `dispatch-escalation.ts`. The risks comment's
+signature (`computeRisksPatternsKey`) lives in `cache-record.ts` but is computed
+by `submission.ts`.
+*Solution:* move shared helpers into small modules named for what they do.
+
+**Module boundaries follow a line-count rule, not responsibilities.** The five
+largest files sit at 992–999 lines, just under a 1,000-line lint cap, and many
+modules say in their header that they were split out to stay under it
+(`dispatch-agents.ts`, `forwarded-warnings.ts`, `stage-pr-cli.ts`, …).
+*Solution:* split by responsibility (e.g. per pipeline stage), then let size follow.
+
 ## Possible bugs
 
 **Config warnings may never reach the PR.** Lens-file and ROUTING warnings land
