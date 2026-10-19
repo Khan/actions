@@ -152,6 +152,37 @@ flowchart TD
 | `dispatch-gate.ts` | `agent_output.json` (queue), `submission-plan.json`, `out/` | pass, or strips the queue and fails |
 | `cache-record.ts` | `agent_output.json`, `submission-plan.json`, `dispatch-result.json`, `diff-facts.json` | `cache-memory/pr-N.json` |
 
+### Files reference
+
+All under `/tmp/gh-aw/review/` unless noted. Shapes are abbreviated (`…` = more fields).
+
+**Staged before the AI starts (`stage-pr.ts`, `router.ts`)**
+
+| File | Stores | Shape |
+|---|---|---|
+| `pr-context.json` | PR metadata (title/description are untrusted author text) | `{number, title, description, author, baseBranch, headSha, isDraft, repo, …}` |
+| `files.json` | changed files | `[{path, status, hasPatch}]` |
+| `full.diff` | whole PR diff, rebuilt from the GitHub API | unified diff text |
+| `threads.json` | this bot's open review threads, with full reply chains | `[{thread_id, path, line, url, comments: [{author, body}]}]` |
+| `prior-reviews.json` | this bot's earlier reviews | `[{id, state, body}]` |
+| `diff-facts.json` | fingerprints of the diff, used to tell what's been reviewed | `{diffFingerprint, hunkSignature}` |
+| `routing.json` | suggested reviewers, owning teams, risk tiers, budget | `{lensesToSpawn, enabledReviewers, teams, perFileTier, generatedFiles, runBudget, pendingRiskQuestions, routingConfig}` |
+| `provenance.json` | which lines each file's diff touches | per file `{added, removedAdjacent, removed}`, plus `snap`, `warnings` |
+| `full-stripped.diff` | diff minus generated files | unified diff text |
+| `full-stripped-annotated.diff` | same, with real line numbers printed (for AI eyes only) | annotated diff text |
+| `rereview-plan.json` | how deep this round reviews, and why | `{depth: full\|scoped\|flip-gated\|fast, reasons, …}` |
+
+**Written during the review**
+
+| File | Written by | Stores | Shape |
+|---|---|---|---|
+| `out/<agent>.json` | `dispatch.ts` | each reviewer's raw output | per agent |
+| `dispatch-result.json` | `dispatch.ts` | final findings plus a record of the run | `{depth, dispatched, shed, claims, merges, reconciliation, riskFiles, patterns, perAgent, totalUsd, …}` |
+| … each `claims[]` entry | | one finding | `{id, source, path, line, label, subject, discussion, failure_scenario, confidence, …}` |
+| `submission-plan.json` | `submission.ts` | exactly what to post | `{event, body, skipSubmission, comments, resolve, reasons, notes}` |
+| `/tmp/gh-aw/agent_output.json` | gh-aw, from the lead AI | the queued GitHub actions | gh-aw safe-output queue |
+| `/tmp/gh-aw/cache-memory/pr-N.json` | `cache-record.ts` | memory of this PR across runs | `{timestamp, commitSha, verdict, filesReviewed, issuesFlagged, diffFingerprint, reviewedHunks, wasDraft, …}` |
+
 ## 2.2 How reviewers are prompted
 
 Every reviewer's prompt is built from three places: text written into the bot's
