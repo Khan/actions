@@ -203,9 +203,10 @@ Files are under `/tmp/gh-aw/review/` unless noted. Shapes are abbreviated (`…`
 
 Every reviewer's prompt is built from three places: text written into the bot's
 `review.md`, files staged by code during the run, and files the repo using the
-bot provides. Each `## agent: <name>` section of `review.md` is extracted by gh-aw
-into `.claude/agents/`, which `dispatch.ts` loads and runs. The repo's files are
-pulled in by `{{#runtime-import …}}` lines, which resolve when the workflow runs.
+bot provides. Each sub-agent is defined as a `## agent: <name>` section in
+`review.md`, and the repo's files are pulled into those sections with
+`{{#runtime-import …}}` lines. gh-aw makes each section available in
+`.claude/agents/`, where `dispatch.ts` (`loadAgents`) reads and runs it.
 
 ```mermaid
 flowchart LR
