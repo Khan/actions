@@ -40,10 +40,10 @@ const VALID_RUNS_ON_RE =
 
 /**
  * A plain runner name accepted as-is. Repos are moving jobs off the
- * ephemeral-runner pool and onto GitHub-hosted runners, so a job that names
- * this runner directly has opted out of the conditional expression and must
- * not be rewritten back into it. Other plain names (e.g. larger-runner labels)
- * are still wrapped.
+ * ephemeral-runner pool and onto GitHub-hosted runners because the pool can't
+ * keep up with their CI load, so a job that names this runner directly has
+ * opted out of the conditional expression and must not be rewritten back into
+ * it. Other plain names (e.g. larger-runner labels) are still wrapped.
  */
 const GITHUB_HOSTED_RUNNER = "ubuntu-latest";
 
