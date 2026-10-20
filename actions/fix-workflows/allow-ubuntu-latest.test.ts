@@ -191,3 +191,18 @@ describe("action.yml", () => {
         );
     });
 });
+
+// cli.ts calls fixWorkflows at module scope, so importing it here would run the
+// fixer over this checkout; pin the flag string it accepts instead, matching the
+// one action.yml emits above. parseArgs ignores unknown flags, so a mismatch
+// would otherwise fail silently.
+describe("cli.ts", () => {
+    const cliTs = fs.readFileSync(
+        new URL("./cli.ts", import.meta.url),
+        "utf-8",
+    );
+
+    it("parses the same --allow-ubuntu-latest flag action.yml emits", () => {
+        expect(cliTs).toContain('argv[i] === "--allow-ubuntu-latest"');
+    });
+});
