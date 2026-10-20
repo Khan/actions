@@ -1,8 +1,8 @@
 # Review Bot — Architecture
 
 Part 1 explains the bot in plain terms. Part 2 maps each idea to the files and
-scripts that implement it. The end collects known problems (each with a possible
-solution) and options for moving off gh-aw.
+scripts that implement it. Part 3 covers the eval system. The end collects known
+problems (each with a possible solution) and options for moving off gh-aw.
 
 # Part 1 — Overview
 
@@ -242,6 +242,158 @@ flowchart LR
 The strictness and severity rows are instructions in the prompts, not checks in
 code. `lens-payloads.ts` flags lens files that no reviewer will ever load.
 
+## 2.3 Inside `dispatch.ts`: the sub-agent pipeline
+
+`dispatch.ts` runs every sub-agent and filters their findings in code. There are
+23 sub-agents, in four roles:
+
+| Role | Sub-agents | Job |
+|---|---|---|
+| **Triage** | `pattern-triage` | finds changes repeated across files and narrows the diff to files needing a real review |
+| **Finders** | `correctness-reviewer`, `skill-auditor` (always); 11 specialists picked by routing (`security-auth`, `data-migrations`, …); 6 opt-in reviewers (`holistic`, `completeness`, `test-adequacy`, `first-principles`, `conventions`, `documentation`) | look for problems and return findings |
+| **Thread follow-up** | `thread-reconciler` | decides which of the bot's earlier open threads the new code has fixed (only runs when there are open threads) |
+| **Clean-up** | `claim-clusterer`, `claim-validator` | name findings that describe the same defect; check each claim against the code |
+
+```mermaid
+flowchart TD
+  T["pattern-triage"] --> W
+  subgraph W["In parallel, 4 at a time"]
+    F["finders"]
+    RC["thread-reconciler"]
+  end
+  F --> PG["changed-lines check<br/>(provenance.json)"]
+  PG --> SF["scope filter<br/>(new-scope.json)"]
+  SF --> CL["claim-clusterer<br/>+ merge rules in code"]
+  CL --> SU["drop findings already tracked by an<br/>open thread or settled by a human"]
+  SU --> V["claim-validator"]
+  V --> OUT(["dispatch-result.json"])
+  RC --> OUT
+  classDef agent fill:#dbeafe,stroke:#3b82f6
+  class T,F,RC,CL,V agent
+```
+
+Blue boxes involve sub-agents; the rest is code. `pattern-triage` runs only on full
+and scoped reviews, and cheaper re-review depths run fewer finders or none
+(`rereview-plan.json`).
+
+---
+
+# Part 3 — Evaluation (`eval/`)
+
+The eval system checks changes to the review bot before they ship. It never runs during
+a real review. Its operator guide is `eval/README.md`.
+
+## 3.1 Three tiers
+
+| Tier | What it tests | AI model calls | Entry script | Runs |
+|---|---|---|---|---|
+| **Replay suite** | the pipeline code, by replaying findings recorded in each case | none | vitest (`*.test.ts`) | every push |
+| **Live A/B** | a `review.md` change: real sub-agents from the base and PR versions, scored side by side | sub-agents, judge, match tie-breaker | `live-ab.ts` | PRs touching `workflows/review/**`, plus manual and weekly runs |
+| **Judged replay** | comment quality, replaying recorded findings and scoring the rendered comments with a model judge | judge only | `live-judge.ts` | weekly, or the `live-judge` label |
+
+Two narrower runners reuse the live pieces: `rereview-sweep.ts` (one prompt, every
+re-review mode, priced side by side) and the `lifecycle/` replays (multi-push
+scenarios, tested in `lifecycle.test.ts`).
+
+## 3.2 The case format
+
+A case is one PR to review plus what the right review looks like. There are 62
+cases in `corpus/`, loaded by `corpus/loader.ts`. A case is either a single
+`<id>.json`, or a `<id>/case.json` plus a `tree/` folder holding the code the
+PR touches.
+
+The diagram shows where each part of a case goes. Left: the case's fields.
+Right: the eval code that reads them.
+
+```mermaid
+flowchart LR
+  subgraph Case["case.json"]
+    direction TB
+    Sel["tags, category"]
+    PR["changedFiles, diff,<br/>routerConfig, dimensions"]
+    Rec["findings, validation"]
+    Exp["expected"]
+    LiveIn["live.prContext,<br/>live.rereview, tree/"]
+    Specs["live.mustCatchSpecs,<br/>live.mayFlagSpecs"]
+  end
+  Sel --> Pick["loader.ts / live-ab.ts<br/>pick which cases run"]
+  Sel --> Score
+  PR --> Run["runner.ts<br/>runs the pipeline code"]
+  Rec -->|replay only| Run
+  LiveIn --> Stage["live-stage.ts<br/>stages files for live sub-agents"]
+  Stage --> Run
+  Run --> Score["metrics.ts, gates.ts<br/>(replay scoring)"]
+  Exp --> Score
+  Run --> Match["live-match.ts<br/>(live scoring)"]
+  Specs --> Match
+```
+
+| Field | Read by | Contents |
+|---|---|---|
+| `tags` | `loader.ts`, `live-ab.ts` | `smoke` (24 cases: the per-PR subset), `live` (41: runnable with real models) |
+| `category` | `metrics.ts`, `gates.ts` | `incident-repro` (19), `clean` (16), `golden` (12), `synthetic-mutation` (12), `adversarial-injection` (3). Some metrics apply only to one category (e.g. clean false-block rate) |
+| `changedFiles`, `routerConfig` | `runner.ts` → `route` | the PR's files and the repo's routing rules |
+| `diff` | `runner.ts`, `live-stage.ts` | the PR diff |
+| `dimensions` | `runner.ts` → verdict | which review passes ran |
+| `findings` | `runner.ts` (replay) | saved sub-agent findings |
+| `validation` | `runner.ts` (replay) | saved claim-validator decisions (21 cases) |
+| `expected` | `metrics.ts` | the right verdict and comment count; finding ids that must / must not post |
+| `live.prContext`, `tree/` | `live-stage.ts` | PR title/description and the code snapshot sub-agents read |
+| `live.rereview` | `live-stage.ts` | an earlier review and push, for re-review cases (3 cases) |
+| `live.mustCatchSpecs` | `live-match.ts` | defects that must be found: path, line window, wording patterns, owning lens |
+| `live.mayFlagSpecs` | `live-match.ts` | real defects that aren't the target; matching one isn't counted as noise |
+
+## 3.3 How inputs are provided
+
+```mermaid
+flowchart TD
+  Case([case]) --> R{tier}
+  R -->|replay| RF["recorded findings<br/>stand in for sub-agents"]
+  R -->|live| ST["live-stage.ts: lays out the case<br/>in the same files as production<br/>(pr-context.json, full.diff, …)"]
+  ST --> EX["agent-extract.ts: pulls the agent<br/>sections from each review.md version"]
+  EX --> LP["live-producer.ts + live-runner.ts:<br/>run sub-agents over the case"]
+  RF --> PIPE["runner.ts: production lib functions<br/>(route, provenance gate, scope filter,<br/>validation rules, verdict, rendering)"]
+  LP --> PIPE
+```
+
+Live arms differ from production in ways `live-producer.ts` documents, each with
+a reason:
+
+| Difference | Reason given |
+|---|---|
+| no `thread-reconciler` | eval cases have no open threads |
+| no `pattern-triage` | every changed file in a case is worth reviewing |
+| tools limited to Read/Grep/Glob, plus a hook blocking reads outside the case (`read-scope.ts`) | the corpus and scorer sit on the same machine; a reviewer once read its own answers |
+| `{{#runtime-import}}` lines resolve against the case's `tree/` | no consumer repo exists in the eval |
+
+Some of these have costs; see "Eval" under Problems.
+
+## 3.4 How outputs are judged
+
+| Tier | Scoring | Model involved |
+|---|---|---|
+| Replay | `metrics.ts`: must-catch recall, golden precision, clean false-block rate, noise, confidence calibration. `gates.ts`: holdout-vs-training gap, and an adversarial hard gate | none |
+| Live | `live-match.ts`: a finding matches a spec when its path/line agree and a wording pattern hits. Specs left unmatched go to `match-arbiter.ts`; its matches are marked `via: "fallback"`. Unmatched findings are noise unless they match a may-flag spec or duplicate a match | Haiku arbiter (yes/no per finding) |
+| Live A/B, judged replay | `judge.ts`: scores the quality of each posted comment | Haiku judge |
+
+The live A/B is report-only with one exception: if the PR's version fails an
+adversarial case (best of three retries), the run fails. `aggregate.ts` pools
+repeated runs into per-case rates with confidence intervals; the README's noise
+floor says single-run differences inside those bands mean nothing.
+
+## 3.5 How they run
+
+| Workflow | Trigger | Runs |
+|---|---|---|
+| `review-eval-ab.yml` | PRs touching `workflows/review/**` (smoke subset; `full-eval` label for all live cases); manual dispatch for repeated runs | `live-ab.ts` |
+| `review-eval-drift.yml` | weekly; manual | `live-ab.ts`, both arms on main, full corpus ×3 |
+| `review-eval-full.yml` | weekly; `live-judge` label | `live-judge.ts` |
+| `review-rereview-sweep.yml` | `rereview-sweep` label; manual | `rereview-sweep.ts` |
+
+Every live workflow first runs `live-runner.ts --probe-read-scope`, which checks
+the read-scope hook actually blocks reads outside the case. Spend is capped
+per run (`--max-usd`).
+
 ---
 
 # Problems and possible solutions
@@ -336,6 +488,27 @@ largest files sit at 992–999 lines, just under a 1,000-line lint cap, and many
 modules say in their header that they were split out to stay under it
 (`dispatch-agents.ts`, `forwarded-warnings.ts`, `stage-pr-cli.ts`, …).
 *Solution:* split by responsibility (e.g. per pipeline stage), then let size follow.
+
+## Eval
+
+**The eval doesn't run the production pipeline.** Neither tier calls
+`runDispatch` or `runSubmissionCli`. `runner.ts` recombines lib functions itself,
+and live arms use their own sub-agent runner (`live-runner.ts`, separate from
+`dispatch-runner.ts`) and their own `## agent:` extractor (`agent-extract.ts`).
+Changes to how `dispatch.ts` or `submission.ts` wire things together go
+untested, and the copies drift: `live-producer.ts` redefines `DEFAULT_FINDERS`
+instead of importing it from `dispatch-roster.ts`.
+*Solution:* make `runDispatch` and `runSubmissionCli` the eval's entry points,
+with the model runner and file paths injected.
+
+**Live sub-agents run under different tools than production.** Production allows
+Read/Grep/Glob/LS/Bash; the eval allows Read/Grep/Glob, so `investigation-cap.ts`
+is unreachable and the cap's fallback path is what's measured.
+*Solution:* share one tool policy (and one cap hook) between both runners.
+
+**Stale header in `judge.ts`.** It describes an "Opus-4.8 judge"; the pinned model
+is `claude-haiku-4-5-20251001`.
+*Solution:* fix the comment.
 
 ## Possible bugs
 
