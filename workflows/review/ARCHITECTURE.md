@@ -286,7 +286,8 @@ orchestrator is asked to follow, unlike the steps already moved into scripts.
 
 ## Stale and misleading text
 
-**Comments describe a removed "agent" dispatch mode.** Only `scripted` exists
+**Comments describe a removed `task` dispatch mode** (the old Task-tool path,
+e.g. `dispatch.ts`, `router.ts`, `dispatch-runner.ts`). Only `scripted` exists
 in code.
 *Solution:* delete the references.
 
@@ -312,7 +313,7 @@ separately in 16 files, `readJson` in 5, and each CLI has its own filesystem typ
 *Solution:* one shared file-access module.
 
 **Files are opened far from the step that owns them.** `routing.json` is opened
-by path in 9 modules, `rereview-plan.json` in 8, `dispatch-result.json` in 6,
+by path in 9 modules, `rereview-plan.json` in 8, `dispatch-result.json` in 8,
 including helpers like `version-footer.ts` and `investigation-cap.ts`. So any
 module can quietly depend on any step's output.
 *Solution:* read each file once per script and pass the values down as arguments.
