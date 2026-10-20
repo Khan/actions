@@ -6,7 +6,8 @@
  *    specified setup action step (default: Khan/actions@secure-network-v1).
  * 2. Optionally, every `runs-on:` value must use the conditional expression:
  *    "${{ vars.USE_GITHUB_RUNNERS == 'true' && '<runner>' || 'ephemeral-runner' }}"
- *    or be exactly `ubuntu-latest` (see GITHUB_HOSTED_RUNNER).
+ *    A repo can also opt in to accepting a plain `ubuntu-latest` (see
+ *    ALLOWED_PLAIN_RUNNER).
  *
  * When a violation is found it is fixed automatically.
  * Comments are preserved via the yaml package's document API.
@@ -39,13 +40,16 @@ const VALID_RUNS_ON_RE =
     /vars\.USE_GITHUB_RUNNERS\s*==\s*'true'\s*&&\s*'[^']+'\s*\|\|\s*'ephemeral-runner[\w-]*'\s*\}\}$/;
 
 /**
- * A plain runner name accepted as-is. Repos are moving jobs off the
- * ephemeral-runner pool and onto GitHub-hosted runners because the pool can't
- * keep up with their CI load, so a job that names this runner directly has
- * opted out of the conditional expression and must not be rewritten back into
- * it. Other plain names (e.g. larger-runner labels) are still wrapped.
+ * The one plain runner name left as-is when a repo opts in with
+ * `allowUbuntuLatest`. Some repos are moving jobs off the ephemeral-runner pool
+ * and onto GitHub-hosted runners because the pool can't keep up with their CI
+ * load, so in those repos a job that names this runner directly has opted out
+ * of the conditional expression and must not be rewritten back into it. Other
+ * plain names (e.g. larger-runner labels) are still wrapped. It's opt-in
+ * because `ubuntu-latest` is also what boilerplate workflows use, and repos
+ * that are staying on the pool still want those jobs routed to it.
  */
-const GITHUB_HOSTED_RUNNER = "ubuntu-latest";
+const ALLOWED_PLAIN_RUNNER = "ubuntu-latest";
 
 // ---------------------------------------------------------------------------
 // Ignore directives
@@ -392,10 +396,10 @@ export function isExemptRunner(job: YAMLMap): boolean {
 
 /**
  * Return true if the job's `runs-on` value is non-compliant (i.e., it is a
- * plain runner name other than GITHUB_HOSTED_RUNNER rather than the required
- * conditional expression).
+ * plain runner name rather than the required conditional expression). With
+ * `allowUbuntuLatest`, a plain ALLOWED_PLAIN_RUNNER is compliant too.
  */
-export function checkRunsOn(job: YAMLMap): boolean {
+export function checkRunsOn(job: YAMLMap, allowUbuntuLatest = false): boolean {
     const runsOn = job.get("runs-on");
     if (typeof runsOn !== "string") {
         return false;
@@ -408,19 +412,19 @@ export function checkRunsOn(job: YAMLMap): boolean {
     if (runsOnIgnored(job)) {
         return false;
     }
-    if (runsOn === GITHUB_HOSTED_RUNNER) {
+    if (allowUbuntuLatest && runsOn === ALLOWED_PLAIN_RUNNER) {
         return false;
     }
     return !VALID_RUNS_ON_RE.test(runsOn);
 }
 
 /**
- * If the job's `runs-on` is a plain runner name other than
- * GITHUB_HOSTED_RUNNER, replace it with the required conditional expression.
- * Returns true if changed.
+ * If the job's `runs-on` is a non-compliant plain runner name (see
+ * checkRunsOn), replace it with the required conditional expression. Returns
+ * true if changed.
  */
-export function fixRunsOn(job: YAMLMap): boolean {
-    if (!checkRunsOn(job)) {
+export function fixRunsOn(job: YAMLMap, allowUbuntuLatest = false): boolean {
+    if (!checkRunsOn(job, allowUbuntuLatest)) {
         return false;
     }
     const runsOn = job.get("runs-on") as string;
@@ -431,6 +435,7 @@ export function fixRunsOn(job: YAMLMap): boolean {
 
 type JobOptions = {
     shouldFixRunsOn?: boolean;
+    allowUbuntuLatest?: boolean;
     setupAction?: string;
 };
 
@@ -443,6 +448,7 @@ export function processJob(
     job: YAMLMap,
     {
         shouldFixRunsOn = false,
+        allowUbuntuLatest = false,
         setupAction = DEFAULT_SETUP_ACTION,
     }: JobOptions = {},
 ): boolean {
@@ -451,7 +457,7 @@ export function processJob(
     }
     let changed = false;
     if (shouldFixRunsOn) {
-        changed = fixRunsOn(job) || changed;
+        changed = fixRunsOn(job, allowUbuntuLatest) || changed;
     }
     const steps = (job as any).get("steps");
     if (isSeq(steps)) {
@@ -468,6 +474,7 @@ export function checkJob(
     job: YAMLMap,
     {
         shouldFixRunsOn = false,
+        allowUbuntuLatest = false,
         setupAction = DEFAULT_SETUP_ACTION,
     }: JobOptions = {},
 ): boolean {
@@ -476,7 +483,7 @@ export function checkJob(
     }
     const steps = (job as any).get("steps");
     return (
-        (shouldFixRunsOn && checkRunsOn(job)) ||
+        (shouldFixRunsOn && checkRunsOn(job, allowUbuntuLatest)) ||
         (isSeq(steps) && checkSteps(steps, setupAction))
     );
 }
@@ -524,17 +531,21 @@ type CoreLike = {
 export default async function fixWorkflows({
     core,
     fixRunsOn: shouldFixRunsOn = false,
+    allowUbuntuLatest = false,
     setupAction = DEFAULT_SETUP_ACTION,
 }: {
     core: CoreLike;
     fixRunsOn?: boolean;
+    allowUbuntuLatest?: boolean;
     setupAction?: string;
 }): Promise<void> {
     const files = getFilesToCheck();
     let fixedCount = 0;
 
     for (const file of files) {
-        if (processFile(file, {shouldFixRunsOn, setupAction})) {
+        if (
+            processFile(file, {shouldFixRunsOn, allowUbuntuLatest, setupAction})
+        ) {
             fixedCount++;
         }
     }
@@ -553,6 +564,7 @@ export default async function fixWorkflows({
                     isMap(item.value) &&
                     checkJob(item.value as YAMLMap, {
                         shouldFixRunsOn,
+                        allowUbuntuLatest,
                         setupAction,
                     })
                 ) {

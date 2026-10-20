@@ -8,8 +8,15 @@ inputs:
     fix-runs-on:
         description: >-
             Whether to fix runs-on values to use the conditional
-            ephemeral-runner expression. A plain `ubuntu-latest` is left
-            as-is. Off by default.
+            ephemeral-runner expression. Off by default.
+        required: false
+        default: "false"
+    allow-ubuntu-latest:
+        description: >-
+            With fix-runs-on, leave a plain `ubuntu-latest` runs-on as-is
+            instead of wrapping it in the conditional expression, for repos
+            moving jobs onto GitHub-hosted runners. Other plain runner names
+            are still wrapped. Off by default.
         required: false
         default: "false"
     setup-action:
@@ -31,6 +38,7 @@ runs:
                       require('./actions/fix-workflows/index.js').default({
                           core,
                           fixRunsOn: ${{ inputs.fix-runs-on == 'true' }},
+                          allowUbuntuLatest: ${{ inputs.allow-ubuntu-latest == 'true' }},
                           setupAction: `${{ inputs.setup-action }}`,
                       }).catch(err => core.setFailed(err.message))
                   } catch (err) {
@@ -64,7 +72,7 @@ runs:
               else
                 MAJOR_VERSION=$(node -p "require('${{ github.action_path }}/package.json').version.split('.')[0]")
                 TAG="fix-workflows-v${MAJOR_VERSION}"
-                ARGS="${{ inputs.fix-runs-on == 'true' && ' --fix-runs-on' || '' }} --setup-action '${{ inputs.setup-action }}'"
+                ARGS="${{ inputs.fix-runs-on == 'true' && ' --fix-runs-on' || '' }}${{ inputs.allow-ubuntu-latest == 'true' && ' --allow-ubuntu-latest' || '' }} --setup-action '${{ inputs.setup-action }}'"
                 CMD="pnpm dlx github:Khan/actions#${TAG}${ARGS}"
                 HINT="Or add a '# fix-workflows-ignore' comment to the runs-on line or checkout step to opt out."
                 for file in $(git diff --name-only .github/workflows/); do

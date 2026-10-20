@@ -3,7 +3,7 @@
  * CLI entrypoint for fix-workflows.
  *
  * Usage:
- *   pnpm dlx fix-workflows [--fix-runs-on] [--setup-action <action>]
+ *   pnpm dlx fix-workflows [--fix-runs-on] [--allow-ubuntu-latest] [--setup-action <action>]
  *
  * Fixes workflow lint violations and then formats all workflow YAML files
  * with oxfmt. Runs from the current working directory, expecting
@@ -19,23 +19,27 @@ import fixWorkflows, {
 
 function parseArgs(argv: string[]): {
     fixRunsOn: boolean;
+    allowUbuntuLatest: boolean;
     setupAction: string;
 } {
     let fixRunsOn = false;
+    let allowUbuntuLatest = false;
     let setupAction = DEFAULT_SETUP_ACTION;
 
     for (let i = 2; i < argv.length; i++) {
         if (argv[i] === "--fix-runs-on") {
             fixRunsOn = true;
+        } else if (argv[i] === "--allow-ubuntu-latest") {
+            allowUbuntuLatest = true;
         } else if (argv[i] === "--setup-action" && i + 1 < argv.length) {
             setupAction = argv[++i]!;
         }
     }
 
-    return {fixRunsOn, setupAction};
+    return {fixRunsOn, allowUbuntuLatest, setupAction};
 }
 
-const {fixRunsOn, setupAction} = parseArgs(process.argv);
+const {fixRunsOn, allowUbuntuLatest, setupAction} = parseArgs(process.argv);
 
 const core = {
     info: (message: string) => console.log(message), // eslint-disable-line no-console
@@ -45,7 +49,7 @@ const core = {
     },
 };
 
-fixWorkflows({core, fixRunsOn, setupAction})
+fixWorkflows({core, fixRunsOn, allowUbuntuLatest, setupAction})
     .then(() => {
         // Format workflow files with oxfmt after fixing lint violations, skipping
         // the generator-owned ones for the same reason the fixer does (see
