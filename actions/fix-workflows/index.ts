@@ -6,6 +6,7 @@
  *    specified setup action step (default: Khan/actions@secure-network-v1).
  * 2. Optionally, every `runs-on:` value must use the conditional expression:
  *    "${{ vars.USE_GITHUB_RUNNERS == 'true' && '<runner>' || 'ephemeral-runner' }}"
+ *    or be exactly `ubuntu-latest` (see GITHUB_HOSTED_RUNNER).
  *
  * When a violation is found it is fixed automatically.
  * Comments are preserved via the yaml package's document API.
@@ -36,6 +37,15 @@ const YAML_WRITE_OPTIONS = {indent: 4, lineWidth: 0} as const;
 /** Matches the required conditional runs-on expression (any runner name). */
 const VALID_RUNS_ON_RE =
     /vars\.USE_GITHUB_RUNNERS\s*==\s*'true'\s*&&\s*'[^']+'\s*\|\|\s*'ephemeral-runner[\w-]*'\s*\}\}$/;
+
+/**
+ * A plain runner name accepted as-is. Repos are moving jobs off the
+ * ephemeral-runner pool and onto GitHub-hosted runners, so a job that names
+ * this runner directly has opted out of the conditional expression and must
+ * not be rewritten back into it. Other plain names (e.g. larger-runner labels)
+ * are still wrapped.
+ */
+const GITHUB_HOSTED_RUNNER = "ubuntu-latest";
 
 // ---------------------------------------------------------------------------
 // Ignore directives
@@ -382,7 +392,8 @@ export function isExemptRunner(job: YAMLMap): boolean {
 
 /**
  * Return true if the job's `runs-on` value is non-compliant (i.e., it is a
- * plain runner name rather than the required conditional expression).
+ * plain runner name other than GITHUB_HOSTED_RUNNER rather than the required
+ * conditional expression).
  */
 export function checkRunsOn(job: YAMLMap): boolean {
     const runsOn = job.get("runs-on");
@@ -397,12 +408,16 @@ export function checkRunsOn(job: YAMLMap): boolean {
     if (runsOnIgnored(job)) {
         return false;
     }
+    if (runsOn === GITHUB_HOSTED_RUNNER) {
+        return false;
+    }
     return !VALID_RUNS_ON_RE.test(runsOn);
 }
 
 /**
- * If the job's `runs-on` is a plain runner name, replace it with the
- * required conditional expression. Returns true if changed.
+ * If the job's `runs-on` is a plain runner name other than
+ * GITHUB_HOSTED_RUNNER, replace it with the required conditional expression.
+ * Returns true if changed.
  */
 export function fixRunsOn(job: YAMLMap): boolean {
     if (!checkRunsOn(job)) {

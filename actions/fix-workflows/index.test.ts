@@ -686,11 +686,21 @@ jobs:
             false,
         ],
         [
-            "returns true for a plain ubuntu-latest string",
+            "returns false for a plain ubuntu-latest string",
             `
 jobs:
   build:
     runs-on: ubuntu-latest
+    steps: []
+`,
+            false,
+        ],
+        [
+            "returns true for a plain versioned ubuntu string",
+            `
+jobs:
+  build:
+    runs-on: ubuntu-24.04
     steps: []
 `,
             true,
@@ -761,7 +771,7 @@ jobs:
         );
     });
 
-    it("replaces ubuntu-latest with the conditional expression", () => {
+    it("returns false and leaves runs-on unchanged for ubuntu-latest", () => {
         // Arrange
         const job = parseWorkflowJob(`
 jobs:
@@ -774,10 +784,8 @@ jobs:
         const result = fixRunsOn(job);
 
         // Assert
-        expect(result).toBe(true);
-        expect(job.get("runs-on")).toBe(
-            "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}",
-        );
+        expect(result).toBe(false);
+        expect(job.get("runs-on")).toBe("ubuntu-latest");
     });
 
     it("returns false and leaves runs-on unchanged for a macos- runner", () => {
@@ -875,7 +883,7 @@ jobs:
         const {doc, job} = parseWorkflowJobWithDoc(`
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-l
     steps: []
 `);
 
@@ -885,7 +893,7 @@ jobs:
         // Assert
         expect(result).toBe(true);
         expect(job.get("runs-on")).toBe(
-            "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}",
+            "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest-l' || 'ephemeral-runner' }}",
         );
     });
 
@@ -964,7 +972,7 @@ jobs:
         const job = parseWorkflowJob(`
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-l
     steps: []
 `);
 

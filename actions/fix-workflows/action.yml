@@ -8,7 +8,8 @@ inputs:
     fix-runs-on:
         description: >-
             Whether to fix runs-on values to use the conditional
-            ephemeral-runner expression. Off by default.
+            ephemeral-runner expression. A plain `ubuntu-latest` is left
+            as-is. Off by default.
         required: false
         default: "false"
     setup-action:
