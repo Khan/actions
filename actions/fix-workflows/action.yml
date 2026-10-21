@@ -1,16 +1,42 @@
 name: Fix Workflows
 description: >-
-    Validates and auto-fixes GitHub Actions workflow YAML files
-    (checkout-followed-by-setup and optionally runs-on patterns), then
-    formats them with oxfmt. A `# fix-workflows-ignore` comment on a
-    `runs-on:` line or a checkout step opts that job/step out of the fix.
+    Validates GitHub Actions workflow YAML files, auto-fixing
+    checkout-followed-by-setup and (when check-runs-on is true) checking
+    every runs-on value against an allowlist, then formats them with oxfmt.
+    A `# fix-workflows-ignore` comment on a `runs-on:` line or a checkout step
+    opts that job/step out of the check.
 inputs:
-    fix-runs-on:
+    check-runs-on:
         description: >-
-            Whether to fix runs-on values to use the conditional
-            ephemeral-runner expression. Off by default.
+            Whether to check every runs-on value against allowed-runs-on. Off
+            by default. Replaces the pre-v4 fix-runs-on input; a value not on
+            the list is reported, not rewritten.
         required: false
         default: "false"
+    fix-runs-on:
+        description: >-
+            Deprecated alias for check-runs-on, kept so a pre-v4 caller's
+            `fix-runs-on: true` still turns the check on. The check is on when
+            either input is true.
+        deprecationMessage: >-
+            fix-runs-on is deprecated: use check-runs-on. It no longer rewrites
+            runs-on values; it only checks them against allowed-runs-on.
+        required: false
+        default: "false"
+    allowed-runs-on:
+        description: >-
+            The runs-on values workflows may use, as a YAML list in a block
+            scalar (an input can only be a string), e.g. `- ubuntu-latest` on
+            each line. Every runs-on must exactly match a value on the list;
+            one that doesn't is reported and fails the run, not rewritten.
+            When empty, the only allowed value is
+            `${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}`.
+            GitHub evaluates `${{ … }}` here before the action sees it,
+            so list an expression by escaping its opener, as in
+            `${{ '${{' }} vars.USE_GITHUB_RUNNERS == 'true' && … }}`,
+            or pass a variable whose value holds the expression text.
+        required: false
+        default: ""
     setup-action:
         description: >-
             The action that must immediately follow every checkout step.
@@ -23,15 +49,24 @@ runs:
     using: "composite"
     steps:
         - name: Fix workflow violations
+          id: fix
           uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+          # The list holds `${{` and quotes, so it reaches the script through
+          # the environment rather than being spliced into its source.
+          env:
+              ALLOWED_RUNS_ON: ${{ inputs.allowed-runs-on }}
           with:
               script: |
                   try {
-                      require('./actions/fix-workflows/index.js').default({
-                          core,
-                          fixRunsOn: ${{ inputs.fix-runs-on == 'true' }},
+                      const fixWorkflows = require('./actions/fix-workflows/index.js')
+                      const options = {
+                          checkRunsOn: ${{ inputs.check-runs-on == 'true' || inputs.fix-runs-on == 'true' }},
+                          allowedRunsOn: fixWorkflows.parseAllowedRunsOn(process.env.ALLOWED_RUNS_ON),
                           setupAction: `${{ inputs.setup-action }}`,
-                      }).catch(err => core.setFailed(err.message))
+                      }
+                      core.setOutput('cli-args', fixWorkflows.cliArgs(options))
+                      fixWorkflows.default({core, ...options})
+                          .catch(err => core.setFailed(err.message))
                   } catch (err) {
                       core.setFailed(err.message)
                   }
@@ -57,15 +92,16 @@ runs:
 
         - name: Show fix instructions
           shell: bash
+          env:
+              CLI_ARGS: ${{ steps.fix.outputs.cli-args }}
           run: |
               if git diff --quiet .github/workflows/; then
                 echo "No workflow changes needed."
               else
                 MAJOR_VERSION=$(node -p "require('${{ github.action_path }}/package.json').version.split('.')[0]")
                 TAG="fix-workflows-v${MAJOR_VERSION}"
-                ARGS="${{ inputs.fix-runs-on == 'true' && ' --fix-runs-on' || '' }} --setup-action '${{ inputs.setup-action }}'"
-                CMD="pnpm dlx github:Khan/actions#${TAG}${ARGS}"
-                HINT="Or add a '# fix-workflows-ignore' comment to the runs-on line or checkout step to opt out."
+                CMD="pnpm dlx github:Khan/actions#${TAG} ${CLI_ARGS}"
+                HINT="Or add a '# fix-workflows-ignore' comment to the checkout step to opt out."
                 for file in $(git diff --name-only .github/workflows/); do
                   echo "::warning file=${file}::This file needs updating. Run: ${CMD} ${HINT}"
                 done
