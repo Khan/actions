@@ -111,6 +111,17 @@ describe("parseCliArgs", () => {
         expect(() => parseCliArgs(args)).toThrow(`${args[0]} needs a value`);
     });
 
+    // As with the config's unknown keys, a typo mustn't quietly leave the
+    // check off.
+    it.each([["--check-runs-on=true"], ["--check-run-on"], ["extra"]])(
+        "throws on an unknown argument: %s",
+        (arg) => {
+            expect(() => parseCliArgs([arg])).toThrow(
+                `Unknown argument ${arg}`,
+            );
+        },
+    );
+
     it("reads --config-file and --setup-action", () => {
         expect(
             parseCliArgs([
@@ -397,6 +408,31 @@ jobs:
         ).rejects.toThrow("ci/fix-workflows.yml");
     });
 
+    it("fails before touching any file when the config is broken", async () => {
+        const committed = `name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+`;
+        await expect(
+            run(
+                {
+                    [CI]: committed,
+                    [DEFAULT_CONFIG_FILE]:
+                        "allowed-run-on:\n    - ubuntu-latest\n",
+                },
+                {checkRunsOn: true},
+            ),
+        ).rejects.toThrow("unknown key(s) allowed-run-on");
+        // The setup autofix would otherwise have inserted a setup step here.
+        expect(fs.readFileSync(path.join(workspace!, CI), "utf8")).toBe(
+            committed,
+        );
+    });
+
     // Without a list, v4 enforces what the pre-v4 regex did for the common
     // case: the ephemeral-runner toggle.
     it("allows the ephemeral-runner toggle when there's no config", async () => {
@@ -503,9 +539,13 @@ describe("action.yml", () => {
         const input = action.inputs["fix-runs-on"];
         expect(input.default).toBe("false");
         expect(input.deprecationMessage).toContain("check-runs-on");
+        const either =
+            "${{ inputs.check-runs-on == 'true' || inputs.fix-runs-on == 'true' }}";
         expect(step("Fix workflow violations").with.script).toContain(
-            "checkRunsOn: ${{ inputs.check-runs-on == 'true' || inputs.fix-runs-on == 'true' }},",
+            `checkRunsOn: ${either},`,
         );
+        // The hint's local command has to honor the alias too.
+        expect(step("Show fix instructions").env.CHECK_RUNS_ON).toBe(either);
     });
 
     // A quote or `${` in a string input would run as JS if spliced into the

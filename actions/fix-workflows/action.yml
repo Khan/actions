@@ -109,7 +109,8 @@ runs:
               else
                 MAJOR_VERSION=$(node -p "require('${{ github.action_path }}/package.json').version.split('.')[0]")
                 TAG="fix-workflows-v${MAJOR_VERSION}"
-                # The same options as the step above, as flags parseCliArgs reads.
+                # The options "Fix workflow violations" ran with, as the flags
+                # parseCliArgs reads, so the local command does the same.
                 ARGS=""
                 if [[ "$CHECK_RUNS_ON" == "true" ]]; then
                   ARGS+=" --check-runs-on"

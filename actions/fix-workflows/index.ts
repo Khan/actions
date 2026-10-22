@@ -44,8 +44,10 @@ const YAML_WRITE_OPTIONS = {indent: 4, lineWidth: 0} as const;
 export const DEFAULT_CONFIG_FILE = ".github/fix-workflows.yml";
 
 /**
- * The allowlist when the config lists none: the ephemeral-runner toggle that
- * fix-workflows required (as a regex) before v4.
+ * The allowlist when the config lists none: the `ubuntu-latest` form of the
+ * ephemeral-runner toggle. The pre-v4 regex accepted that toggle with any
+ * runner name (`'ubuntu-latest-l'`, `'ubuntu-26.04'`, ...); those forms now
+ * have to be listed in the config.
  */
 export const DEFAULT_ALLOWED_RUNS_ON: readonly string[] = [
     "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}",
@@ -657,8 +659,9 @@ export type Options = {
 
 /**
  * Parse the CLI's arguments (without the leading `node` and script path).
- * `--fix-runs-on` is the pre-v4 name for `--check-runs-on`. A flag missing
- * its value throws rather than quietly falling back to the default.
+ * `--fix-runs-on` is the pre-v4 name for `--check-runs-on`. An unknown
+ * argument or a flag missing its value throws rather than quietly falling
+ * back to the default.
  */
 export function parseCliArgs(args: readonly string[]): Required<Options> {
     const options: Required<Options> = {
@@ -681,6 +684,10 @@ export function parseCliArgs(args: readonly string[]): Required<Options> {
             options.configFile = valueOf(i++);
         } else if (arg === "--setup-action") {
             options.setupAction = valueOf(i++);
+        } else {
+            // Every token reaching here is meant as a flag (values are
+            // consumed above), so this is a typo or `--flag=value`.
+            throw new Error(`Unknown argument ${arg}`);
         }
     }
     return options;

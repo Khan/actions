@@ -30,9 +30,11 @@ entries that aren't non-empty strings, fail the run so a typo can't fall back to
 default list.
 
 With no config file, or no `allowed-runs-on` entries, the only allowed value is the
-toggle fix-workflows required before v4,
+`ubuntu-latest` form of the toggle,
 `${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}`,
-and the run logs that it is using it. With the check on, a `config-file` given
+and the run logs that it is using it. The pre-v4 regex accepted that toggle with any
+runner name, so a repo that uses it with another runner (such as `'ubuntu-latest-l'`)
+has to list that form in the config. With the check on, a `config-file` given
 explicitly must exist. With the check off, the config is neither read nor
 validated, so a mistake in it can't fail the run; if it exists, the run warns
 that it isn't being used.
@@ -48,6 +50,12 @@ take `shouldFixRunsOn`.
 
 `setup-action` now reaches the fixer's script through the environment instead of
 being pasted into its source.
+
+Only string `runs-on` values are checked. A label array (`[self-hosted, linux]`)
+or a `group:` map is not compared to the list, as before.
+
+The CLI now rejects an unknown argument or a flag missing its value instead of
+ignoring it.
 
 Unchanged: the checkout-followed-by-setup autofix, the `macos-` runner exemption,
 `# fix-workflows-ignore` directives (`runs-on` scope included), and skipping
