@@ -16,7 +16,8 @@
  * Run oxfmt after this script to normalize formatting.
  *
  * Individual jobs, `runs-on:` lines, or checkout steps can opt out of a fix
- * with an inline `fix-workflows-ignore` comment — see IGNORE_DIRECTIVE_RE.
+ * or check with an inline `fix-workflows-ignore` comment — see
+ * IGNORE_DIRECTIVE_RE.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -54,7 +55,7 @@ export const DEFAULT_ALLOWED_RUNS_ON: readonly string[] = [
 // Ignore directives
 // ---------------------------------------------------------------------------
 
-/** The fixes an ignore directive can suppress. */
+/** The fixes and checks an ignore directive can suppress. */
 export type IgnoreRule = "runs-on" | "setup";
 
 const ALL_IGNORE_RULES: readonly IgnoreRule[] = ["runs-on", "setup"];
@@ -166,7 +167,7 @@ function pairNodes(map: YAMLMap, keyName: string): Node[] {
 }
 
 /**
- * Return true if the runs-on fix is suppressed for `job` by an ignore
+ * Return true if the runs-on check is suppressed for `job` by an ignore
  * directive on the `runs-on:` line (trailing or immediately above it) or on
  * the job's leading comment.
  */
@@ -465,14 +466,14 @@ export function parseConfig(text: string, filePath: string): Config {
 
 /**
  * Read and parse the config at `filePath` (relative to the repo root). A
- * missing file means no settings, unless `required` is set, which callers do
- * when the path was given explicitly: naming a file that isn't there is a
- * mistake, not a request for the defaults.
+ * missing file returns null, unless `required` is set, which callers do when
+ * the path was given explicitly: naming a file that isn't there is a mistake,
+ * not a request for the defaults.
  */
 export function readConfig(
     filePath: string,
     {required = false}: {required?: boolean} = {},
-): Config {
+): Config | null {
     let text: string;
     try {
         text = fs.readFileSync(path.resolve(repoRoot, filePath), "utf8");
@@ -483,40 +484,9 @@ export function readConfig(
         if (required) {
             throw new Error(`The config file ${filePath} does not exist.`);
         }
-        return {allowedRunsOn: []};
+        return null;
     }
     return parseConfig(text, filePath);
-}
-
-export type Options = {
-    /** Whether to check `runs-on` against the allowlist. */
-    checkRunsOn?: boolean;
-    /** The config file; empty means DEFAULT_CONFIG_FILE, if it exists. */
-    configFile?: string;
-    setupAction?: string;
-};
-
-/**
- * Parse the CLI's arguments (without the leading `node` and script path).
- * `--fix-runs-on` is the pre-v4 name for `--check-runs-on`.
- */
-export function parseCliArgs(args: readonly string[]): Required<Options> {
-    const options: Required<Options> = {
-        checkRunsOn: false,
-        configFile: "",
-        setupAction: DEFAULT_SETUP_ACTION,
-    };
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-        if (arg === "--check-runs-on" || arg === "--fix-runs-on") {
-            options.checkRunsOn = true;
-        } else if (arg === "--config-file" && i + 1 < args.length) {
-            options.configFile = args[++i]!;
-        } else if (arg === "--setup-action" && i + 1 < args.length) {
-            options.setupAction = args[++i]!;
-        }
-    }
-    return options;
 }
 
 /**
@@ -677,6 +647,45 @@ export type AnnotationProperties = {
     startLine?: number | undefined;
 };
 
+export type Options = {
+    /** Whether to check `runs-on` against the allowlist. */
+    checkRunsOn?: boolean;
+    /** The config file; empty means DEFAULT_CONFIG_FILE, if it exists. */
+    configFile?: string;
+    setupAction?: string;
+};
+
+/**
+ * Parse the CLI's arguments (without the leading `node` and script path).
+ * `--fix-runs-on` is the pre-v4 name for `--check-runs-on`. A flag missing
+ * its value throws rather than quietly falling back to the default.
+ */
+export function parseCliArgs(args: readonly string[]): Required<Options> {
+    const options: Required<Options> = {
+        checkRunsOn: false,
+        configFile: "",
+        setupAction: DEFAULT_SETUP_ACTION,
+    };
+    const valueOf = (i: number): string => {
+        const value = args[i + 1];
+        if (value === undefined || value.startsWith("--")) {
+            throw new Error(`${args[i]} needs a value`);
+        }
+        return value;
+    };
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === "--check-runs-on" || arg === "--fix-runs-on") {
+            options.checkRunsOn = true;
+        } else if (arg === "--config-file") {
+            options.configFile = valueOf(i++);
+        } else if (arg === "--setup-action") {
+            options.setupAction = valueOf(i++);
+        }
+    }
+    return options;
+}
+
 type CoreLike = {
     info: (message: string) => void;
     warning: (message: string) => void;
@@ -691,20 +700,30 @@ export default async function fixWorkflows({
     setupAction = DEFAULT_SETUP_ACTION,
 }: Options & {core: CoreLike}): Promise<void> {
     const configPath = configFile || DEFAULT_CONFIG_FILE;
-    // Read the config before touching any file, so a broken one fails the run
-    // without leaving half-applied fixes behind.
-    const config = readConfig(configPath, {required: configFile !== ""});
-    if (!shouldCheckRunsOn && config.allowedRunsOn.length > 0) {
+    let allowedRunsOn = new Set(DEFAULT_ALLOWED_RUNS_ON);
+    if (shouldCheckRunsOn) {
+        // Read the config before touching any file, so a broken one fails
+        // the run without leaving half-applied fixes behind.
+        const config = readConfig(configPath, {required: configFile !== ""});
+        if (config && config.allowedRunsOn.length > 0) {
+            allowedRunsOn = new Set(config.allowedRunsOn);
+        } else {
+            const why = config
+                ? `${configPath} lists no allowed-runs-on`
+                : `No ${configPath}`;
+            core.info(
+                `${why}; allowing only the default runs-on: ` +
+                    DEFAULT_ALLOWED_RUNS_ON.join(", "),
+            );
+        }
+    } else if (fs.existsSync(path.resolve(repoRoot, configPath))) {
+        // The config only matters to the check, so with the check off it is
+        // neither validated nor allowed to fail the run.
         core.warning(
-            `${configPath} lists allowed-runs-on, but check-runs-on is off, ` +
-                `so runs-on values aren't checked.`,
+            `${configPath} exists, but check-runs-on is off, so runs-on ` +
+                `values aren't checked against it.`,
         );
     }
-    const allowedRunsOn = new Set(
-        config.allowedRunsOn.length > 0
-            ? config.allowedRunsOn
-            : DEFAULT_ALLOWED_RUNS_ON,
-    );
     const files = getFilesToCheck();
     let fixedCount = 0;
     let runsOnViolationCount = 0;

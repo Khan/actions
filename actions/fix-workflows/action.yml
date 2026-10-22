@@ -47,6 +47,7 @@ runs:
     using: "composite"
     steps:
         - name: Fix workflow violations
+          id: fix
           uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
           # String inputs reach the script through the environment rather than
           # being spliced into its source, where a quote or `${` would run as JS.
@@ -56,12 +57,15 @@ runs:
           with:
               script: |
                   try {
-                      require('./actions/fix-workflows/index.js').default({
+                      await require('./actions/fix-workflows/index.js').default({
                           core,
                           checkRunsOn: ${{ inputs.check-runs-on == 'true' || inputs.fix-runs-on == 'true' }},
                           configFile: process.env.CONFIG_FILE,
                           setupAction: process.env.SETUP_ACTION,
-                      }).catch(err => core.setFailed(err.message))
+                      })
+                      // A run that finds violations still gets here (it calls
+                      // setFailed rather than throwing); a crash doesn't.
+                      core.setOutput('completed', 'true')
                   } catch (err) {
                       core.setFailed(err.message)
                   }
@@ -77,11 +81,13 @@ runs:
         # `generatedWorkflowSkipGlobs()` in index.ts; generated-workflows.test.ts
         # fails if they drift from it.
         #
-        # `!cancelled()` here and below: a runs-on violation fails the step
-        # above, but any setup-step fixes it made still need formatting and a
-        # hint, since the hint is how a caller learns to apply them.
+        # The `if:` here and below: a runs-on violation fails the step above,
+        # but any setup-step fixes it made still need formatting and a hint,
+        # since the hint is how a caller learns to apply them. `completed` is
+        # only set when the fixer ran to the end, so a crash still skips both
+        # steps instead of formatting files the fixer never looked at.
         - name: Format YAML files with oxfmt
-          if: ${{ !cancelled() }}
+          if: ${{ !cancelled() && steps.fix.outputs.completed == 'true' }}
           shell: bash
           run: |
               npx --yes oxfmt@0.44.0 --write \
@@ -91,7 +97,7 @@ runs:
                 '!.github/workflows/**/agentics-maintenance.yml'
 
         - name: Show fix instructions
-          if: ${{ !cancelled() }}
+          if: ${{ !cancelled() && steps.fix.outputs.completed == 'true' }}
           shell: bash
           env:
               CHECK_RUNS_ON: ${{ inputs.check-runs-on == 'true' || inputs.fix-runs-on == 'true' }}
@@ -99,7 +105,7 @@ runs:
               SETUP_ACTION: ${{ inputs.setup-action }}
           run: |
               if git diff --quiet .github/workflows/; then
-                echo "No workflow changes needed."
+                echo "No setup-step fixes to apply."
               else
                 MAJOR_VERSION=$(node -p "require('${{ github.action_path }}/package.json').version.split('.')[0]")
                 TAG="fix-workflows-v${MAJOR_VERSION}"

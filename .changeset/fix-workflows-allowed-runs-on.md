@@ -31,18 +31,20 @@ default list.
 
 With no config file, or no `allowed-runs-on` entries, the only allowed value is the
 toggle fix-workflows required before v4,
-`${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}`.
-A `config-file` given explicitly must exist. If the config lists `allowed-runs-on`
-while the check is off, the run warns that nothing is being checked.
+`${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}`,
+and the run logs that it is using it. With the check on, a `config-file` given
+explicitly must exist. With the check off, the config is neither read nor
+validated, so a mistake in it can't fail the run; if it exists, the run warns
+that it isn't being used.
 
 A value not on the list is reported, not rewritten. fix-workflows annotates the
 `runs-on` line (as committed, before the setup autofix shifts any lines) with the
 allowed values and fails. The formatting and fix-instructions steps still run after
-that failure, so setup-step fixes in the same run still get their hint. The
-`USE_GITHUB_RUNNERS` / `ephemeral-runner` regex and the autofix that wrapped plain
-runner names in it are gone, along with the exported `fixRunsOn`. `checkRunsOn` now
-takes the allowed set, and `processJob` / `checkJob` no longer take
-`shouldFixRunsOn`.
+that failure (but not after a crash), so setup-step fixes in the same run still get
+their hint. The `USE_GITHUB_RUNNERS` / `ephemeral-runner` regex and the autofix that
+wrapped plain runner names in it are gone, along with the exported `fixRunsOn`.
+`checkRunsOn` now takes the allowed set, and `processJob` / `checkJob` no longer
+take `shouldFixRunsOn`.
 
 `setup-action` now reaches the fixer's script through the environment instead of
 being pasted into its source.

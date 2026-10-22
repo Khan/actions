@@ -23,7 +23,13 @@ import fixWorkflows, {
     parseCliArgs,
 } from "./index";
 
-const options = parseCliArgs(process.argv.slice(2));
+let options: ReturnType<typeof parseCliArgs>;
+try {
+    options = parseCliArgs(process.argv.slice(2));
+} catch (err) {
+    console.error((err as Error).message); // eslint-disable-line no-console
+    process.exit(1);
+}
 
 const core = {
     info: (message: string) => console.log(message), // eslint-disable-line no-console

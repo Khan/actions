@@ -103,6 +103,14 @@ describe("parseCliArgs", () => {
         },
     );
 
+    it.each([
+        [["--config-file"]],
+        [["--config-file", "--check-runs-on"]],
+        [["--setup-action"]],
+    ])("throws when a flag is missing its value: %o", (args) => {
+        expect(() => parseCliArgs(args)).toThrow(`${args[0]} needs a value`);
+    });
+
     it("reads --config-file and --setup-action", () => {
         expect(
             parseCliArgs([
@@ -415,7 +423,7 @@ jobs:
         expect(core.warning).not.toHaveBeenCalled();
     });
 
-    it("warns when the config lists runners but the check is off", async () => {
+    it("warns when a config exists but the check is off", async () => {
         const core = await run({
             [CI]: workflow("ubuntu-latest-l"),
             [DEFAULT_CONFIG_FILE]: config("ubuntu-latest"),
@@ -425,6 +433,47 @@ jobs:
         );
         expect(core.setFailed).not.toHaveBeenCalled();
     });
+
+    // The config only matters to the check, so a mistake in it can't fail a
+    // run that has the check off.
+    it("doesn't validate the config when the check is off", async () => {
+        const core = await run({
+            [CI]: workflow("ubuntu-latest-l"),
+            [DEFAULT_CONFIG_FILE]: "allowed-run-on:\n    - ubuntu-latest\n",
+        });
+        expect(core.warning).toHaveBeenCalledTimes(1);
+        expect(core.setFailed).not.toHaveBeenCalled();
+    });
+
+    it("doesn't require a configFile given when the check is off", async () => {
+        const core = await run(
+            {[CI]: workflow("ubuntu-latest-l")},
+            {configFile: "ci/fix-workflows.yml"},
+        );
+        expect(core.warning).not.toHaveBeenCalled();
+        expect(core.setFailed).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["there's no config", {}, "No .github/fix-workflows.yml"],
+        [
+            "the config lists none",
+            {[DEFAULT_CONFIG_FILE]: "allowed-runs-on: []\n"},
+            "lists no allowed-runs-on",
+        ],
+    ])(
+        "says it's using the default list when %s",
+        async (_name, files, message) => {
+            const core = await run(
+                {[CI]: workflow(TOGGLE), ...files},
+                {checkRunsOn: true},
+            );
+            expect(core.info).toHaveBeenCalledWith(
+                expect.stringContaining(message),
+            );
+            expect(core.setFailed).not.toHaveBeenCalled();
+        },
+    );
 });
 
 describe("action.yml", () => {
@@ -472,13 +521,21 @@ describe("action.yml", () => {
     });
 
     // A runs-on violation fails the fixer step, but its setup-step fixes still
-    // need formatting and the hint.
-    it("runs the formatter and the hint after a failed fixer step", () => {
+    // need formatting and the hint. A crash sets no `completed` output, so it
+    // still skips them.
+    it("runs the formatter and the hint after the fixer completes, even if it failed", () => {
+        const script: string = step("Fix workflow violations").with.script;
+        expect(step("Fix workflow violations").id).toBe("fix");
+        expect(script).toMatch(
+            /await require\([^)]*\)\.default\([\s\S]*\)\s+(?:\/\/.*\s+)*core\.setOutput\('completed', 'true'\)/,
+        );
         for (const name of [
             "Format YAML files with oxfmt",
             "Show fix instructions",
         ]) {
-            expect(step(name).if).toBe("${{ !cancelled() }}");
+            expect(step(name).if).toBe(
+                "${{ !cancelled() && steps.fix.outputs.completed == 'true' }}",
+            );
         }
     });
 
