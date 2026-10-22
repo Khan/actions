@@ -4,14 +4,12 @@
  * Rules enforced:
  * 1. Every `actions/checkout` step must be immediately followed by a
  *    specified setup action step (default: Khan/actions@secure-network-v1).
- * 2. When turned on with `check-runs-on: true`, every `runs-on:` value must
- *    exactly match one of the `allowed-runs-on` values in the calling repo's
- *    config file, or DEFAULT_ALLOWED_RUNS_ON when it lists none (see
- *    readConfig).
+ * 2. When turned on with `fix-runs-on`, every `runs-on:` value must exactly
+ *    match one of the `allowed-runs-on` values in the calling repo's config
+ *    file, or DEFAULT_ALLOWED_RUNS_ON when it lists none (see readConfig).
  *
- * A setup-step violation is fixed automatically. A `runs-on` violation is
- * only reported: with an exact-match list there is no single right
- * replacement to write.
+ * Violations are fixed automatically. A disallowed `runs-on` is replaced by
+ * the first allowed value, so one run can bring a whole repo into line.
  * Comments are preserved via the yaml package's document API.
  * Run oxfmt after this script to normalize formatting.
  *
@@ -25,7 +23,6 @@ import * as path from "node:path";
 import {
     isMap,
     isSeq,
-    LineCounter,
     parse,
     parseDocument,
     type Document,
@@ -44,8 +41,8 @@ const YAML_WRITE_OPTIONS = {indent: 4, lineWidth: 0} as const;
 export const DEFAULT_CONFIG_FILE = ".github/fix-workflows.yml";
 
 /**
- * The allowlist when the config lists none: the `ubuntu-latest` form of the
- * ephemeral-runner toggle. The pre-v4 regex accepted that toggle with any
+ * The allowlist when the config lists none, and so what `fix-runs-on` writes
+ * then: the `ubuntu-latest` form of the ephemeral-runner toggle. The pre-v4 regex accepted that toggle with any
  * runner name (`'ubuntu-latest-l'`, `'ubuntu-26.04'`, ...); those forms now
  * have to be listed in the config.
  */
@@ -514,63 +511,26 @@ export function checkRunsOn(
     return !allowed.has(runsOn);
 }
 
-export type RunsOnViolation = {
-    jobId: string;
-    runsOn: string;
-    /** 1-based line of the `runs-on` value, when a LineCounter was given. */
-    line?: number | undefined;
-};
-
 /**
- * Return every job in `doc` whose `runs-on` isn't on the allowlist. Pass the
- * LineCounter the document was parsed with to get line numbers.
+ * If the job's `runs-on` isn't allowed (by the same rules as checkRunsOn),
+ * replace it with `replacement`. Returns true if changed.
  */
-export function findRunsOnViolations(
-    doc: Document,
+export function fixRunsOn(
+    job: YAMLMap,
     allowed: ReadonlySet<string>,
-    lineCounter?: LineCounter,
-): RunsOnViolation[] {
-    const violations: RunsOnViolation[] = [];
-    const jobs = doc.get("jobs");
-    if (!isMap(jobs)) {
-        return violations;
+    replacement: string,
+): boolean {
+    if (!checkRunsOn(job, allowed)) {
+        return false;
     }
-    for (const item of jobs.items) {
-        const job = item.value;
-        if (!isMap(job) || !checkRunsOn(job as YAMLMap, allowed)) {
-            continue;
-        }
-        const valueNode = pairNodes(job as YAMLMap, "runs-on")[1];
-        const offset = valueNode?.range?.[0];
-        violations.push({
-            jobId: String((item.key as any)?.value ?? item.key),
-            runsOn: job.get("runs-on") as string,
-            line:
-                lineCounter && offset !== undefined
-                    ? lineCounter.linePos(offset).line
-                    : undefined,
-        });
-    }
-    return violations;
-}
-
-/** The annotation text for a `runs-on` value that isn't on the allowlist. */
-export function runsOnViolationMessage(
-    violation: RunsOnViolation,
-    allowed: ReadonlySet<string>,
-): string {
-    const list = [...allowed].map((value) => `  ${value}`).join("\n");
-    return (
-        `Job '${violation.jobId}' has runs-on '${violation.runsOn}', which ` +
-        `is not an allowed value. Use one of these (matched exactly, ` +
-        `including spacing):\n${list}\n` +
-        `Or add it to allowed-runs-on in the config file, or add a ` +
-        `'# fix-workflows-ignore: runs-on' comment to the runs-on line.`
-    );
+    (job as any).set("runs-on", replacement);
+    return true;
 }
 
 type JobOptions = {
     setupAction?: string;
+    /** When given, replace disallowed `runs-on` values (see fixRunsOn). */
+    fixRunsOn?: {allowed: ReadonlySet<string>; replacement: string} | undefined;
 };
 
 /**
@@ -580,12 +540,16 @@ type JobOptions = {
 export function processJob(
     doc: Document,
     job: YAMLMap,
-    {setupAction = DEFAULT_SETUP_ACTION}: JobOptions = {},
+    {setupAction = DEFAULT_SETUP_ACTION, fixRunsOn: runsOnFix}: JobOptions = {},
 ): boolean {
     if (isExemptRunner(job)) {
         return false;
     }
     let changed = false;
+    if (runsOnFix) {
+        changed =
+            fixRunsOn(job, runsOnFix.allowed, runsOnFix.replacement) || changed;
+    }
     const steps = (job as any).get("steps");
     if (isSeq(steps)) {
         changed = fixSteps(doc, steps, setupAction) || changed;
@@ -595,8 +559,8 @@ export function processJob(
 
 /**
  * Return true if a single job map has any remaining setup-step violations.
- * Always returns false for exempt runners. `runs-on` is checked separately,
- * by findRunsOnViolations.
+ * Always returns false for exempt runners. `runs-on` needs no re-check:
+ * fixRunsOn replaces every disallowed value.
  */
 export function checkJob(
     job: YAMLMap,
@@ -644,14 +608,12 @@ export function processFile(
 // Main (exported for use as a GitHub Action)
 // ---------------------------------------------------------------------------
 
-export type AnnotationProperties = {
-    file?: string;
-    startLine?: number | undefined;
-};
-
 export type Options = {
-    /** Whether to check `runs-on` against the allowlist. */
-    checkRunsOn?: boolean;
+    /**
+     * Whether to replace `runs-on` values that aren't on the allowlist with
+     * its first entry.
+     */
+    fixRunsOn?: boolean;
     /** The config file; empty means DEFAULT_CONFIG_FILE, if it exists. */
     configFile?: string;
     setupAction?: string;
@@ -659,13 +621,12 @@ export type Options = {
 
 /**
  * Parse the CLI's arguments (without the leading `node` and script path).
- * `--fix-runs-on` is the pre-v4 name for `--check-runs-on`. An unknown
- * argument or a flag missing its value throws rather than quietly falling
- * back to the default.
+ * An unknown argument or a flag missing its value throws rather than quietly
+ * falling back to the default.
  */
 export function parseCliArgs(args: readonly string[]): Required<Options> {
     const options: Required<Options> = {
-        checkRunsOn: false,
+        fixRunsOn: false,
         configFile: "",
         setupAction: DEFAULT_SETUP_ACTION,
     };
@@ -678,8 +639,8 @@ export function parseCliArgs(args: readonly string[]): Required<Options> {
     };
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
-        if (arg === "--check-runs-on" || arg === "--fix-runs-on") {
-            options.checkRunsOn = true;
+        if (arg === "--fix-runs-on") {
+            options.fixRunsOn = true;
         } else if (arg === "--config-file") {
             options.configFile = valueOf(i++);
         } else if (arg === "--setup-action") {
@@ -696,24 +657,24 @@ export function parseCliArgs(args: readonly string[]): Required<Options> {
 type CoreLike = {
     info: (message: string) => void;
     warning: (message: string) => void;
-    error: (message: string, properties?: AnnotationProperties) => void;
     setFailed: (message: string) => void;
 };
 
 export default async function fixWorkflows({
     core,
-    checkRunsOn: shouldCheckRunsOn = false,
+    fixRunsOn: shouldFixRunsOn = false,
     configFile = "",
     setupAction = DEFAULT_SETUP_ACTION,
 }: Options & {core: CoreLike}): Promise<void> {
     const configPath = configFile || DEFAULT_CONFIG_FILE;
-    let allowedRunsOn = new Set(DEFAULT_ALLOWED_RUNS_ON);
-    if (shouldCheckRunsOn) {
+    let runsOnFix: JobOptions["fixRunsOn"];
+    if (shouldFixRunsOn) {
         // Read the config before touching any file, so a broken one fails
         // the run without leaving half-applied fixes behind.
         const config = readConfig(configPath, {required: configFile !== ""});
+        let allowedRunsOn = DEFAULT_ALLOWED_RUNS_ON;
         if (config && config.allowedRunsOn.length > 0) {
-            allowedRunsOn = new Set(config.allowedRunsOn);
+            allowedRunsOn = config.allowedRunsOn;
         } else {
             const why = config
                 ? `${configPath} lists no allowed-runs-on`
@@ -723,40 +684,25 @@ export default async function fixWorkflows({
                     DEFAULT_ALLOWED_RUNS_ON.join(", "),
             );
         }
+        // Disallowed values become the first entry, so a repo lists the
+        // runner it wants unlisted jobs moved to first.
+        runsOnFix = {
+            allowed: new Set(allowedRunsOn),
+            replacement: allowedRunsOn[0]!,
+        };
     } else if (fs.existsSync(path.resolve(repoRoot, configPath))) {
-        // The config only matters to the check, so with the check off it is
-        // neither validated nor allowed to fail the run.
+        // The config only matters to fix-runs-on, so with it off the config
+        // is neither validated nor allowed to fail the run.
         core.warning(
-            `${configPath} exists, but check-runs-on is off, so runs-on ` +
+            `${configPath} exists, but fix-runs-on is off, so runs-on ` +
                 `values aren't checked against it.`,
         );
     }
     const files = getFilesToCheck();
     let fixedCount = 0;
-    let runsOnViolationCount = 0;
 
     for (const file of files) {
-        // Check runs-on before the setup autofix rewrites the file: inserted
-        // steps would shift the lines, and GitHub shows annotations against
-        // the committed file. The autofix never changes runs-on, so the
-        // result is the same either way.
-        if (shouldCheckRunsOn) {
-            const content = fs.readFileSync(path.join(repoRoot, file), "utf8");
-            const lineCounter = new LineCounter();
-            const doc = parseDocument(content, {lineCounter});
-            for (const violation of findRunsOnViolations(
-                doc,
-                allowedRunsOn,
-                lineCounter,
-            )) {
-                core.error(runsOnViolationMessage(violation, allowedRunsOn), {
-                    file,
-                    startLine: violation.line,
-                });
-                runsOnViolationCount++;
-            }
-        }
-        if (processFile(file, {setupAction})) {
+        if (processFile(file, {setupAction, fixRunsOn: runsOnFix})) {
             fixedCount++;
         }
     }
@@ -779,21 +725,12 @@ export default async function fixWorkflows({
         }
     }
 
-    const failures: string[] = [];
     if (stillBroken.length > 0) {
-        failures.push(
+        core.setFailed(
             `Could not auto-fix all violations:\n${stillBroken
                 .map((f) => `  ${f}`)
                 .join("\n")}`,
         );
-    }
-    if (runsOnViolationCount > 0) {
-        failures.push(
-            `${runsOnViolationCount} runs-on value(s) are not allowed; see the errors above.`,
-        );
-    }
-    if (failures.length > 0) {
-        core.setFailed(failures.join("\n"));
         return;
     }
 

@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {afterEach, describe, expect, it, vi} from "vitest";
-import {isMap, LineCounter, parse, parseDocument} from "yaml";
+import {isMap, parse, parseDocument} from "yaml";
 
 import {
     checkJob,
@@ -11,11 +11,11 @@ import {
     DEFAULT_ALLOWED_RUNS_ON,
     DEFAULT_CONFIG_FILE,
     DEFAULT_SETUP_ACTION,
-    findRunsOnViolations,
+    fixRunsOn,
+    type Options,
     parseCliArgs,
     parseConfig,
     processJob,
-    runsOnViolationMessage,
 } from "./index.ts";
 
 /**
@@ -90,30 +90,27 @@ allowed-runs-on:
 describe("parseCliArgs", () => {
     it("defaults to the action's defaults", () => {
         expect(parseCliArgs([])).toEqual({
-            checkRunsOn: false,
+            fixRunsOn: false,
             configFile: "",
             setupAction: DEFAULT_SETUP_ACTION,
         });
     });
 
-    it.each([["--check-runs-on"], ["--fix-runs-on"]])(
-        "turns the check on with %s",
-        (flag) => {
-            expect(parseCliArgs([flag]).checkRunsOn).toBe(true);
-        },
-    );
+    it("reads --fix-runs-on", () => {
+        expect(parseCliArgs(["--fix-runs-on"]).fixRunsOn).toBe(true);
+    });
 
     it.each([
         [["--config-file"]],
-        [["--config-file", "--check-runs-on"]],
+        [["--config-file", "--fix-runs-on"]],
         [["--setup-action"]],
     ])("throws when a flag is missing its value: %o", (args) => {
         expect(() => parseCliArgs(args)).toThrow(`${args[0]} needs a value`);
     });
 
     // As with the config's unknown keys, a typo mustn't quietly leave the
-    // check off.
-    it.each([["--check-runs-on=true"], ["--check-run-on"], ["extra"]])(
+    // fix off.
+    it.each([["--fix-runs-on=true"], ["--fix-run-on"], ["extra"]])(
         "throws on an unknown argument: %s",
         (arg) => {
             expect(() => parseCliArgs([arg])).toThrow(
@@ -131,7 +128,7 @@ describe("parseCliArgs", () => {
                 "./.github/actions/setup",
             ]),
         ).toEqual({
-            checkRunsOn: false,
+            fixRunsOn: false,
             configFile: "ci/fix-workflows.yml",
             setupAction: "./.github/actions/setup",
         });
@@ -187,6 +184,36 @@ jobs:
     });
 });
 
+describe("fixRunsOn", () => {
+    it("replaces a runs-on that isn't allowed", () => {
+        const {job} = parseJob(`
+jobs:
+  build:
+    runs-on: ubuntu-latest-l
+    steps: []
+`);
+        expect(fixRunsOn(job, ALLOWED, "ubuntu-latest")).toBe(true);
+        expect(job.get("runs-on")).toBe("ubuntu-latest");
+    });
+
+    it.each([
+        ["an allowed value", "ubuntu-latest"],
+        ["an ignored value", "ubuntu-latest-l # fix-workflows-ignore: runs-on"],
+        ["a macos- runner", "macos-latest"],
+        ["a label array", "[self-hosted, linux]"],
+    ])("leaves %s alone", (_name, runsOn) => {
+        const {job} = parseJob(`
+jobs:
+  build:
+    runs-on: ${runsOn}
+    steps: []
+`);
+        const before = job.toJSON()["runs-on"];
+        expect(fixRunsOn(job, ALLOWED, "ubuntu-latest")).toBe(false);
+        expect(job.toJSON()["runs-on"]).toEqual(before);
+    });
+});
+
 // INFRA-11270 requires that a job can pick its runner by who triggered the
 // run, and that listing the expression as written allows it.
 describe("a per-user runs-on expression", () => {
@@ -218,9 +245,8 @@ jobs:
 });
 
 describe("processJob and checkJob", () => {
-    // The runs-on autofix is gone: a value not on the list is reported by
-    // findRunsOnViolations, never rewritten.
-    it("leave a runs-on that is not on the list untouched", () => {
+    // Without the fixRunsOn option (fix-runs-on off), runs-on is left alone.
+    it("leave a runs-on untouched without the fixRunsOn option", () => {
         const {doc, job} = parseJob(`
 jobs:
   build:
@@ -230,50 +256,6 @@ jobs:
         expect(processJob(doc, job)).toBe(false);
         expect(job.get("runs-on")).toBe("ubuntu-latest-l");
         expect(checkJob(job)).toBe(false);
-    });
-});
-
-describe("findRunsOnViolations", () => {
-    it("reports each job whose runs-on is not on the list, with its line", () => {
-        const lineCounter = new LineCounter();
-        const doc = parseDocument(
-            `name: CI
-jobs:
-  ok:
-    runs-on: ubuntu-latest
-    steps: []
-  big:
-    runs-on: ubuntu-latest-l
-    steps: []
-  ignored:
-    runs-on: ubuntu-24.04 # fix-workflows-ignore
-    steps: []
-  mac:
-    runs-on: macos-15
-    steps: []
-  pinned:
-    runs-on: "ubuntu-24.04"
-    steps: []
-`,
-            {lineCounter},
-        );
-        expect(findRunsOnViolations(doc, ALLOWED, lineCounter)).toEqual([
-            {jobId: "big", runsOn: "ubuntu-latest-l", line: 7},
-            {jobId: "pinned", runsOn: "ubuntu-24.04", line: 16},
-        ]);
-    });
-});
-
-describe("runsOnViolationMessage", () => {
-    it("names the value, the config key, and every allowed value", () => {
-        const message = runsOnViolationMessage(
-            {jobId: "big", runsOn: "ubuntu-latest-l"},
-            ALLOWED,
-        );
-        expect(message).toContain("'ubuntu-latest-l'");
-        expect(message).toContain("allowed-runs-on");
-        expect(message).toContain("\n  ubuntu-latest\n");
-        expect(message).toContain(`\n  ${TOGGLE}\n`);
     });
 });
 
@@ -294,10 +276,7 @@ describe("fixWorkflows", () => {
      * index.ts reads the repo root from GITHUB_WORKSPACE when it loads, so it
      * is imported fresh.
      */
-    async function run(
-        files: Record<string, string>,
-        options: {checkRunsOn?: boolean; configFile?: string} = {},
-    ) {
+    async function run(files: Record<string, string>, options: Options = {}) {
         workspace = fs.mkdtempSync(path.join(os.tmpdir(), "fix-workflows-"));
         fs.mkdirSync(path.join(workspace, ".github", "workflows"), {
             recursive: true,
@@ -313,7 +292,6 @@ describe("fixWorkflows", () => {
         const core = {
             info: vi.fn(),
             warning: vi.fn(),
-            error: vi.fn(),
             setFailed: vi.fn(),
         };
         await fixWorkflows({core, ...options});
@@ -333,7 +311,25 @@ jobs:
     const config = (...values: string[]) =>
         `allowed-runs-on:\n${values.map((v) => `    - ${v}\n`).join("")}`;
 
-    it("passes when every runs-on is in the config", async () => {
+    const runsOnOf = (job = "build") =>
+        (parse(fs.readFileSync(path.join(workspace!, CI), "utf8")) as any).jobs[
+            job
+        ]["runs-on"];
+
+    it("replaces a disallowed runs-on with the config's first entry", async () => {
+        const core = await run(
+            {
+                [CI]: workflow("ubuntu-latest-l"),
+                [DEFAULT_CONFIG_FILE]: config("ubuntu-latest", TOGGLE),
+            },
+            {fixRunsOn: true},
+        );
+        expect(runsOnOf()).toBe("ubuntu-latest");
+        expect(core.setFailed).not.toHaveBeenCalled();
+        expect(core.info).toHaveBeenCalledWith("Fixed 1 file(s).");
+    });
+
+    it("leaves the file untouched when every runs-on is in the config", async () => {
         const core = await run(
             {
                 [CI]: workflow("ubuntu-latest-l"),
@@ -342,68 +338,72 @@ jobs:
                     "ubuntu-latest-l",
                 ),
             },
-            {checkRunsOn: true},
+            {fixRunsOn: true},
         );
-        expect(core.error).not.toHaveBeenCalled();
-        expect(core.setFailed).not.toHaveBeenCalled();
-    });
-
-    it("annotates the line, fails, and leaves the file as it was", async () => {
-        const core = await run(
-            {
-                [CI]: workflow("ubuntu-latest-l"),
-                [DEFAULT_CONFIG_FILE]: config("ubuntu-latest"),
-            },
-            {checkRunsOn: true},
-        );
-        expect(core.error).toHaveBeenCalledTimes(1);
-        expect(core.error.mock.calls[0]![1]).toEqual({file: CI, startLine: 5});
-        expect(core.setFailed).toHaveBeenCalledTimes(1);
         expect(fs.readFileSync(path.join(workspace!, CI), "utf8")).toBe(
             workflow("ubuntu-latest-l"),
         );
+        expect(core.info).toHaveBeenCalledWith("No violations found.");
     });
 
-    // The setup autofix inserts steps above the second job's runs-on, but
-    // GitHub shows the annotation against the committed file.
-    it("annotates the runs-on line as committed, not as autofixed", async () => {
-        const committed = `name: CI
+    // One run brings a whole file into line: both rules, every job.
+    it("fixes runs-on and setup steps across jobs in one run", async () => {
+        await run(
+            {
+                [CI]: `name: CI
 on: push
 jobs:
   first:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-l
     steps:
       - uses: actions/checkout@v4
   second:
-    runs-on: ubuntu-latest-l
+    runs-on: ubuntu-26.04
     steps: []
-`;
-        const core = await run(
-            {[CI]: committed, [DEFAULT_CONFIG_FILE]: config("ubuntu-latest")},
-            {checkRunsOn: true},
+`,
+                [DEFAULT_CONFIG_FILE]: config("ubuntu-latest"),
+            },
+            {fixRunsOn: true},
         );
-        expect(fs.readFileSync(path.join(workspace!, CI), "utf8")).not.toBe(
-            committed,
+        expect(runsOnOf("first")).toBe("ubuntu-latest");
+        expect(runsOnOf("second")).toBe("ubuntu-latest");
+        const steps = (
+            parse(fs.readFileSync(path.join(workspace!, CI), "utf8")) as any
+        ).jobs.first.steps;
+        expect(steps[1].uses).toBe(DEFAULT_SETUP_ACTION);
+    });
+
+    // Without a list, v4 enforces the `ubuntu-latest` form of the
+    // ephemeral-runner toggle, and writes it.
+    it("writes the default toggle when there's no config", async () => {
+        expect(DEFAULT_ALLOWED_RUNS_ON).toEqual([TOGGLE]);
+        await run({[CI]: workflow("ubuntu-latest-l")}, {fixRunsOn: true});
+        expect(runsOnOf()).toBe(TOGGLE);
+    });
+
+    it("leaves the default toggle alone when there's no config", async () => {
+        await run({[CI]: workflow(TOGGLE)}, {fixRunsOn: true});
+        expect(fs.readFileSync(path.join(workspace!, CI), "utf8")).toBe(
+            workflow(TOGGLE),
         );
-        expect(core.error.mock.calls[0]![1]).toEqual({file: CI, startLine: 9});
     });
 
     it("reads the config from configFile when given", async () => {
-        const core = await run(
+        await run(
             {
-                [CI]: workflow("ubuntu-latest-l"),
+                [CI]: workflow("ubuntu-latest-m"),
                 "ci/fix-workflows.yml": config("ubuntu-latest-l"),
             },
-            {checkRunsOn: true, configFile: "ci/fix-workflows.yml"},
+            {fixRunsOn: true, configFile: "ci/fix-workflows.yml"},
         );
-        expect(core.setFailed).not.toHaveBeenCalled();
+        expect(runsOnOf()).toBe("ubuntu-latest-l");
     });
 
     it("throws, naming the path, when a configFile given is missing", async () => {
         await expect(
             run(
                 {[CI]: workflow("ubuntu-latest")},
-                {checkRunsOn: true, configFile: "ci/fix-workflows.yml"},
+                {fixRunsOn: true, configFile: "ci/fix-workflows.yml"},
             ),
         ).rejects.toThrow("ci/fix-workflows.yml");
     });
@@ -413,7 +413,7 @@ jobs:
 on: push
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-l
     steps:
       - uses: actions/checkout@v4
 `;
@@ -424,70 +424,13 @@ jobs:
                     [DEFAULT_CONFIG_FILE]:
                         "allowed-run-on:\n    - ubuntu-latest\n",
                 },
-                {checkRunsOn: true},
+                {fixRunsOn: true},
             ),
         ).rejects.toThrow("unknown key(s) allowed-run-on");
-        // The setup autofix would otherwise have inserted a setup step here.
+        // Both fixes would otherwise have changed this file.
         expect(fs.readFileSync(path.join(workspace!, CI), "utf8")).toBe(
             committed,
         );
-    });
-
-    // Without a list, v4 enforces what the pre-v4 regex did for the common
-    // case: the ephemeral-runner toggle.
-    it("allows the ephemeral-runner toggle when there's no config", async () => {
-        expect(DEFAULT_ALLOWED_RUNS_ON).toEqual([TOGGLE]);
-        const core = await run({[CI]: workflow(TOGGLE)}, {checkRunsOn: true});
-        expect(core.error).not.toHaveBeenCalled();
-        expect(core.setFailed).not.toHaveBeenCalled();
-    });
-
-    it("rejects anything else when there's no config", async () => {
-        const core = await run(
-            {[CI]: workflow("ubuntu-latest")},
-            {checkRunsOn: true},
-        );
-        expect(core.error).toHaveBeenCalledTimes(1);
-        expect(core.setFailed).toHaveBeenCalledTimes(1);
-    });
-
-    // Off by default, as `fix-runs-on` was before v4.
-    it("skips the runs-on check unless checkRunsOn is set", async () => {
-        const core = await run({[CI]: workflow("ubuntu-latest-l")});
-        expect(core.error).not.toHaveBeenCalled();
-        expect(core.setFailed).not.toHaveBeenCalled();
-        expect(core.warning).not.toHaveBeenCalled();
-    });
-
-    it("warns when a config exists but the check is off", async () => {
-        const core = await run({
-            [CI]: workflow("ubuntu-latest-l"),
-            [DEFAULT_CONFIG_FILE]: config("ubuntu-latest"),
-        });
-        expect(core.warning).toHaveBeenCalledWith(
-            expect.stringContaining("check-runs-on is off"),
-        );
-        expect(core.setFailed).not.toHaveBeenCalled();
-    });
-
-    // The config only matters to the check, so a mistake in it can't fail a
-    // run that has the check off.
-    it("doesn't validate the config when the check is off", async () => {
-        const core = await run({
-            [CI]: workflow("ubuntu-latest-l"),
-            [DEFAULT_CONFIG_FILE]: "allowed-run-on:\n    - ubuntu-latest\n",
-        });
-        expect(core.warning).toHaveBeenCalledTimes(1);
-        expect(core.setFailed).not.toHaveBeenCalled();
-    });
-
-    it("doesn't require a configFile given when the check is off", async () => {
-        const core = await run(
-            {[CI]: workflow("ubuntu-latest-l")},
-            {configFile: "ci/fix-workflows.yml"},
-        );
-        expect(core.warning).not.toHaveBeenCalled();
-        expect(core.setFailed).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -502,7 +445,7 @@ jobs:
         async (_name, files, message) => {
             const core = await run(
                 {[CI]: workflow(TOGGLE), ...files},
-                {checkRunsOn: true},
+                {fixRunsOn: true},
             );
             expect(core.info).toHaveBeenCalledWith(
                 expect.stringContaining(message),
@@ -510,6 +453,45 @@ jobs:
             expect(core.setFailed).not.toHaveBeenCalled();
         },
     );
+
+    // Off by default, as before v4.
+    it("leaves runs-on alone unless fixRunsOn is set", async () => {
+        const core = await run({[CI]: workflow("ubuntu-latest-l")});
+        expect(runsOnOf()).toBe("ubuntu-latest-l");
+        expect(core.setFailed).not.toHaveBeenCalled();
+        expect(core.warning).not.toHaveBeenCalled();
+    });
+
+    it("warns when a config exists but the fix is off", async () => {
+        const core = await run({
+            [CI]: workflow("ubuntu-latest-l"),
+            [DEFAULT_CONFIG_FILE]: config("ubuntu-latest"),
+        });
+        expect(core.warning).toHaveBeenCalledWith(
+            expect.stringContaining("fix-runs-on is off"),
+        );
+        expect(core.setFailed).not.toHaveBeenCalled();
+    });
+
+    // The config only matters to fix-runs-on, so a mistake in it can't fail
+    // a run that has the fix off.
+    it("doesn't validate the config when the fix is off", async () => {
+        const core = await run({
+            [CI]: workflow("ubuntu-latest-l"),
+            [DEFAULT_CONFIG_FILE]: "allowed-run-on:\n    - ubuntu-latest\n",
+        });
+        expect(core.warning).toHaveBeenCalledTimes(1);
+        expect(core.setFailed).not.toHaveBeenCalled();
+    });
+
+    it("doesn't require a configFile given when the fix is off", async () => {
+        const core = await run(
+            {[CI]: workflow("ubuntu-latest-l")},
+            {configFile: "ci/fix-workflows.yml"},
+        );
+        expect(core.warning).not.toHaveBeenCalled();
+        expect(core.setFailed).not.toHaveBeenCalled();
+    });
 });
 
 describe("action.yml", () => {
@@ -529,23 +511,17 @@ describe("action.yml", () => {
         }
     });
 
-    it("leaves the runs-on check off by default, as fix-runs-on was", () => {
-        expect(action.inputs["check-runs-on"].default).toBe("false");
+    it("leaves fix-runs-on off by default, as before v4", () => {
+        expect(action.inputs["fix-runs-on"].default).toBe("false");
     });
 
-    // A pre-v4 caller's `fix-runs-on: true` keeps the check on, with a
-    // deprecation warning, rather than silently turning it off.
-    it("keeps fix-runs-on as a deprecated alias for check-runs-on", () => {
-        const input = action.inputs["fix-runs-on"];
-        expect(input.default).toBe("false");
-        expect(input.deprecationMessage).toContain("check-runs-on");
-        const either =
-            "${{ inputs.check-runs-on == 'true' || inputs.fix-runs-on == 'true' }}";
+    // The hint's local command has to fix runs-on whenever the action did.
+    it("passes fix-runs-on to the fixer and the hint", () => {
+        const expr = "${{ inputs.fix-runs-on == 'true' }}";
         expect(step("Fix workflow violations").with.script).toContain(
-            `checkRunsOn: ${either},`,
+            `fixRunsOn: ${expr},`,
         );
-        // The hint's local command has to honor the alias too.
-        expect(step("Show fix instructions").env.CHECK_RUNS_ON).toBe(either);
+        expect(step("Show fix instructions").env.FIX_RUNS_ON).toBe(expr);
     });
 
     // A quote or `${` in a string input would run as JS if spliced into the
@@ -560,32 +536,13 @@ describe("action.yml", () => {
         expect(fix.with.script).not.toContain("${{ inputs.setup-action");
     });
 
-    // A runs-on violation fails the fixer step, but its setup-step fixes still
-    // need formatting and the hint. A crash sets no `completed` output, so it
-    // still skips them.
-    it("runs the formatter and the hint after the fixer completes, even if it failed", () => {
-        const script: string = step("Fix workflow violations").with.script;
-        expect(step("Fix workflow violations").id).toBe("fix");
-        expect(script).toMatch(
-            /await require\([^)]*\)\.default\([\s\S]*\)\s+(?:\/\/.*\s+)*core\.setOutput\('completed', 'true'\)/,
-        );
-        for (const name of [
-            "Format YAML files with oxfmt",
-            "Show fix instructions",
-        ]) {
-            expect(step(name).if).toBe(
-                "${{ !cancelled() && steps.fix.outputs.completed == 'true' }}",
-            );
-        }
-    });
-
     // Run the hint step's flag-building lines in bash, then parse the flags the
     // way the CLI does, so the hint and the CLI can't drift apart.
     it.each([
-        [{CHECK_RUNS_ON: "false", CONFIG_FILE: "", SETUP_ACTION: "Khan/a@v1"}],
+        [{FIX_RUNS_ON: "false", CONFIG_FILE: "", SETUP_ACTION: "Khan/a@v1"}],
         [
             {
-                CHECK_RUNS_ON: "true",
+                FIX_RUNS_ON: "true",
                 CONFIG_FILE: "ci/it's config.yml",
                 SETUP_ACTION: "./.github/actions/setup",
             },
@@ -602,7 +559,7 @@ describe("action.yml", () => {
             {env: {...process.env, ...env}, encoding: "utf8"},
         );
         expect(parseCliArgs(out.split("\0").slice(0, -1))).toEqual({
-            checkRunsOn: env.CHECK_RUNS_ON === "true",
+            fixRunsOn: env.FIX_RUNS_ON === "true",
             configFile: env.CONFIG_FILE,
             setupAction: env.SETUP_ACTION,
         });

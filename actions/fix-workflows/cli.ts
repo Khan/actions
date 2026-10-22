@@ -3,12 +3,12 @@
  * CLI entrypoint for fix-workflows.
  *
  * Usage:
- *   pnpm dlx fix-workflows [--check-runs-on] [--config-file <path>]
+ *   pnpm dlx fix-workflows [--fix-runs-on] [--config-file <path>]
  *       [--setup-action <action>]
  *
- * `--check-runs-on` checks every runs-on against the allowed-runs-on list in
- * the config file (.github/fix-workflows.yml unless --config-file says
- * otherwise); the pre-v4 `--fix-runs-on` is accepted as an alias for it.
+ * `--fix-runs-on` replaces every runs-on that isn't on the allowed-runs-on
+ * list in the config file (.github/fix-workflows.yml unless --config-file
+ * says otherwise) with the list's first entry, so one run fixes a whole repo.
  *
  * Fixes workflow lint violations and then formats all workflow YAML files
  * with oxfmt. Runs from the current working directory, expecting
@@ -17,11 +17,7 @@
 import {execSync} from "node:child_process";
 import * as path from "node:path";
 
-import fixWorkflows, {
-    type AnnotationProperties,
-    generatedWorkflowSkipGlobs,
-    parseCliArgs,
-} from "./index";
+import fixWorkflows, {generatedWorkflowSkipGlobs, parseCliArgs} from "./index";
 
 let options: ReturnType<typeof parseCliArgs>;
 try {
@@ -34,12 +30,6 @@ try {
 const core = {
     info: (message: string) => console.log(message), // eslint-disable-line no-console
     warning: (message: string) => console.warn(message), // eslint-disable-line no-console
-    error: (message: string, {file, startLine}: AnnotationProperties = {}) => {
-        const where = file
-            ? `${file}${startLine ? `:${startLine}` : ""}: `
-            : "";
-        console.error(`${where}${message}`); // eslint-disable-line no-console
-    },
     setFailed: (message: string) => {
         console.error(message); // eslint-disable-line no-console
         process.exitCode = 1;
