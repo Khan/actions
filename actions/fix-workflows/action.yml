@@ -8,9 +8,10 @@ description: >-
 inputs:
     check-runs-on:
         description: >-
-            Whether to check every runs-on value against allowed-runs-on. Off
-            by default. Replaces the pre-v4 fix-runs-on input; a value not on
-            the list is reported, not rewritten.
+            Whether to check every runs-on value against the allowed-runs-on
+            list in config-file. Off by default. Replaces the pre-v4
+            fix-runs-on input; a value not on the list is reported and fails
+            the run, not rewritten.
         required: false
         default: "false"
     fix-runs-on:
@@ -23,18 +24,15 @@ inputs:
             runs-on values; it only checks them against allowed-runs-on.
         required: false
         default: "false"
-    allowed-runs-on:
+    config-file:
         description: >-
-            The runs-on values workflows may use, as a YAML list in a block
-            scalar (an input can only be a string), e.g. `- ubuntu-latest` on
-            each line. Every runs-on must exactly match a value on the list;
-            one that doesn't is reported and fails the run, not rewritten.
-            When empty, the only allowed value is
+            Path, relative to the repo root, of a YAML file whose
+            `allowed-runs-on` key lists the exact runs-on values workflows may
+            use, copied as they appear in the workflows. When empty,
+            .github/fix-workflows.yml is used if it exists. With no file or no
+            list, the only allowed value is
             `${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}`.
-            GitHub evaluates `${{ … }}` here before the action sees it,
-            so list an expression by escaping its opener, as in
-            `${{ '${{' }} vars.USE_GITHUB_RUNNERS == 'true' && … }}`,
-            or pass a variable whose value holds the expression text.
+            A path given here must exist.
         required: false
         default: ""
     setup-action:
@@ -49,24 +47,21 @@ runs:
     using: "composite"
     steps:
         - name: Fix workflow violations
-          id: fix
           uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
-          # The list holds `${{` and quotes, so it reaches the script through
-          # the environment rather than being spliced into its source.
+          # String inputs reach the script through the environment rather than
+          # being spliced into its source, where a quote or `${` would run as JS.
           env:
-              ALLOWED_RUNS_ON: ${{ inputs.allowed-runs-on }}
+              CONFIG_FILE: ${{ inputs.config-file }}
+              SETUP_ACTION: ${{ inputs.setup-action }}
           with:
               script: |
                   try {
-                      const fixWorkflows = require('./actions/fix-workflows/index.js')
-                      const options = {
+                      require('./actions/fix-workflows/index.js').default({
+                          core,
                           checkRunsOn: ${{ inputs.check-runs-on == 'true' || inputs.fix-runs-on == 'true' }},
-                          allowedRunsOn: fixWorkflows.parseAllowedRunsOn(process.env.ALLOWED_RUNS_ON),
-                          setupAction: `${{ inputs.setup-action }}`,
-                      }
-                      core.setOutput('cli-args', fixWorkflows.cliArgs(options))
-                      fixWorkflows.default({core, ...options})
-                          .catch(err => core.setFailed(err.message))
+                          configFile: process.env.CONFIG_FILE,
+                          setupAction: process.env.SETUP_ACTION,
+                      }).catch(err => core.setFailed(err.message))
                   } catch (err) {
                       core.setFailed(err.message)
                   }
@@ -81,7 +76,12 @@ runs:
         # A bash step cannot import the TypeScript, so these literals are a copy of
         # `generatedWorkflowSkipGlobs()` in index.ts; generated-workflows.test.ts
         # fails if they drift from it.
+        #
+        # `!cancelled()` here and below: a runs-on violation fails the step
+        # above, but any setup-step fixes it made still need formatting and a
+        # hint, since the hint is how a caller learns to apply them.
         - name: Format YAML files with oxfmt
+          if: ${{ !cancelled() }}
           shell: bash
           run: |
               npx --yes oxfmt@0.44.0 --write \
@@ -91,16 +91,28 @@ runs:
                 '!.github/workflows/**/agentics-maintenance.yml'
 
         - name: Show fix instructions
+          if: ${{ !cancelled() }}
           shell: bash
           env:
-              CLI_ARGS: ${{ steps.fix.outputs.cli-args }}
+              CHECK_RUNS_ON: ${{ inputs.check-runs-on == 'true' || inputs.fix-runs-on == 'true' }}
+              CONFIG_FILE: ${{ inputs.config-file }}
+              SETUP_ACTION: ${{ inputs.setup-action }}
           run: |
               if git diff --quiet .github/workflows/; then
                 echo "No workflow changes needed."
               else
                 MAJOR_VERSION=$(node -p "require('${{ github.action_path }}/package.json').version.split('.')[0]")
                 TAG="fix-workflows-v${MAJOR_VERSION}"
-                CMD="pnpm dlx github:Khan/actions#${TAG} ${CLI_ARGS}"
+                # The same options as the step above, as flags parseCliArgs reads.
+                ARGS=""
+                if [[ "$CHECK_RUNS_ON" == "true" ]]; then
+                  ARGS+=" --check-runs-on"
+                fi
+                if [[ -n "$CONFIG_FILE" ]]; then
+                  ARGS+=" --config-file $(printf '%q' "$CONFIG_FILE")"
+                fi
+                ARGS+=" --setup-action $(printf '%q' "$SETUP_ACTION")"
+                CMD="pnpm dlx github:Khan/actions#${TAG}${ARGS}"
                 HINT="Or add a '# fix-workflows-ignore' comment to the checkout step to opt out."
                 for file in $(git diff --name-only .github/workflows/); do
                   echo "::warning file=${file}::This file needs updating. Run: ${CMD} ${HINT}"

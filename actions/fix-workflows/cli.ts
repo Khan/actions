@@ -3,13 +3,12 @@
  * CLI entrypoint for fix-workflows.
  *
  * Usage:
- *   pnpm dlx fix-workflows [--check-runs-on] [--allowed-runs-on <value>]...
+ *   pnpm dlx fix-workflows [--check-runs-on] [--config-file <path>]
  *       [--setup-action <action>]
  *
- * `--check-runs-on` checks every runs-on against the allowlist; the pre-v4
- * `--fix-runs-on` is accepted as a deprecated alias for it.
- * `--allowed-runs-on` takes one runs-on value and may be repeated; without
- * it the default allowlist applies.
+ * `--check-runs-on` checks every runs-on against the allowed-runs-on list in
+ * the config file (.github/fix-workflows.yml unless --config-file says
+ * otherwise); the pre-v4 `--fix-runs-on` is accepted as an alias for it.
  *
  * Fixes workflow lint violations and then formats all workflow YAML files
  * with oxfmt. Runs from the current working directory, expecting
@@ -20,36 +19,15 @@ import * as path from "node:path";
 
 import fixWorkflows, {
     type AnnotationProperties,
-    DEFAULT_SETUP_ACTION,
     generatedWorkflowSkipGlobs,
+    parseCliArgs,
 } from "./index";
 
-function parseArgs(argv: string[]): {
-    checkRunsOn: boolean;
-    allowedRunsOn: string[];
-    setupAction: string;
-} {
-    let checkRunsOn = false;
-    const allowedRunsOn: string[] = [];
-    let setupAction = DEFAULT_SETUP_ACTION;
-
-    for (let i = 2; i < argv.length; i++) {
-        if (argv[i] === "--check-runs-on" || argv[i] === "--fix-runs-on") {
-            checkRunsOn = true;
-        } else if (argv[i] === "--allowed-runs-on" && i + 1 < argv.length) {
-            allowedRunsOn.push(argv[++i]!);
-        } else if (argv[i] === "--setup-action" && i + 1 < argv.length) {
-            setupAction = argv[++i]!;
-        }
-    }
-
-    return {checkRunsOn, allowedRunsOn, setupAction};
-}
-
-const {checkRunsOn, allowedRunsOn, setupAction} = parseArgs(process.argv);
+const options = parseCliArgs(process.argv.slice(2));
 
 const core = {
     info: (message: string) => console.log(message), // eslint-disable-line no-console
+    warning: (message: string) => console.warn(message), // eslint-disable-line no-console
     error: (message: string, {file, startLine}: AnnotationProperties = {}) => {
         const where = file
             ? `${file}${startLine ? `:${startLine}` : ""}: `
@@ -62,7 +40,7 @@ const core = {
     },
 };
 
-fixWorkflows({core, checkRunsOn, allowedRunsOn, setupAction})
+fixWorkflows({core, ...options})
     .then(() => {
         // Format workflow files with oxfmt after fixing lint violations, skipping
         // the generator-owned ones for the same reason the fixer does (see

@@ -5,8 +5,9 @@
  * 1. Every `actions/checkout` step must be immediately followed by a
  *    specified setup action step (default: Khan/actions@secure-network-v1).
  * 2. When turned on with `check-runs-on: true`, every `runs-on:` value must
- *    exactly match one of the values in the `allowed-runs-on` list, or
- *    DEFAULT_ALLOWED_RUNS_ON when it's empty (see parseAllowedRunsOn).
+ *    exactly match one of the `allowed-runs-on` values in the calling repo's
+ *    config file, or DEFAULT_ALLOWED_RUNS_ON when it lists none (see
+ *    readConfig).
  *
  * A setup-step violation is fixed automatically. A `runs-on` violation is
  * only reported: with an exact-match list there is no single right
@@ -38,12 +39,12 @@ const repoRoot = process.env.GITHUB_WORKSPACE ?? process.cwd();
 
 const YAML_WRITE_OPTIONS = {indent: 4, lineWidth: 0} as const;
 
+/** Where the calling repo's config lives, relative to the repo root. */
+export const DEFAULT_CONFIG_FILE = ".github/fix-workflows.yml";
+
 /**
- * The allowlist when the caller gives none: the ephemeral-runner toggle that
+ * The allowlist when the config lists none: the ephemeral-runner toggle that
  * fix-workflows required (as a regex) before v4.
- *
- * This lives here rather than as the input's default in action.yml because
- * GitHub would evaluate the `${{ … }}` in a default before the action sees it.
  */
 export const DEFAULT_ALLOWED_RUNS_ON: readonly string[] = [
     "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}",
@@ -396,66 +397,126 @@ export function isExemptRunner(job: YAMLMap): boolean {
 // runs-on allowlist
 // ---------------------------------------------------------------------------
 
+/** The settings a config file can hold. */
+export type Config = {
+    /** Exact `runs-on` values; empty means DEFAULT_ALLOWED_RUNS_ON. */
+    allowedRunsOn: string[];
+};
+
+const CONFIG_KEYS = ["allowed-runs-on"];
+
 /**
- * Parse the `allowed-runs-on` input: a YAML list of exact `runs-on` values,
- * usually written as a block scalar so each entry reads like the `runs-on` it
- * matches. (An input can't be a real sequence; GitHub only passes strings.)
- * An empty input or an empty list returns [], which fixWorkflows treats as
- * DEFAULT_ALLOWED_RUNS_ON.
+ * Parse a config file's text. It's YAML so that each `allowed-runs-on` entry
+ * follows the same quoting rules as the workflow `runs-on` it's copied from:
  *
- * GitHub evaluates any `${{ … }}` in a `with:` value before the action runs,
- * so this sees the list after evaluation. A caller lists an expression by
- * escaping its opener (`${{ '${{' }} vars.X … }}`) or by passing a variable
- * whose value holds the expression text, which GitHub doesn't evaluate again.
+ *   allowed-runs-on:
+ *       - ubuntu-latest
+ *       - ${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}
+ *
+ * The list is a file rather than an action input because GitHub evaluates
+ * any `${{ … }}` in a `with:` value before the action runs, so an expression
+ * passed inline would arrive resolved rather than as text to compare.
+ *
+ * Unknown keys are rejected so that a misspelled key fails instead of
+ * silently falling back to the default list.
  */
-export function parseAllowedRunsOn(text: string | undefined): string[] {
-    if (!text?.trim()) {
-        return [];
-    }
-    const usage =
-        "allowed-runs-on must be a YAML list of runs-on values, e.g. " +
-        "'- ubuntu-latest' on each line of a block scalar";
+export function parseConfig(text: string, filePath: string): Config {
     let value: unknown;
     try {
         value = parse(text);
     } catch (err: any) {
-        throw new Error(`${usage}: ${err.message}`);
+        throw new Error(`${filePath} is not valid YAML: ${err.message}`);
     }
-    if (value === null) {
-        return [];
+    // An empty or comments-only file parses to null: no settings.
+    if (value === null || value === undefined) {
+        return {allowedRunsOn: []};
     }
-    if (!Array.isArray(value)) {
-        throw new Error(`${usage}; got ${JSON.stringify(value)}`);
+    if (typeof value !== "object" || Array.isArray(value)) {
+        throw new Error(
+            `${filePath} must be a YAML mapping with an allowed-runs-on key`,
+        );
     }
-    for (const item of value) {
+    const unknown = Object.keys(value).filter((k) => !CONFIG_KEYS.includes(k));
+    if (unknown.length > 0) {
+        throw new Error(
+            `${filePath} has unknown key(s) ${unknown.join(", ")}; ` +
+                `expected ${CONFIG_KEYS.join(", ")}`,
+        );
+    }
+    const list = (value as Record<string, unknown>)["allowed-runs-on"];
+    if (list === null || list === undefined) {
+        return {allowedRunsOn: []};
+    }
+    if (!Array.isArray(list)) {
+        throw new Error(
+            `allowed-runs-on in ${filePath} must be a list of runs-on values`,
+        );
+    }
+    for (const item of list) {
         if (typeof item !== "string" || item === "") {
             throw new Error(
-                `${usage}; ${JSON.stringify(item)} is not a runs-on value`,
+                `allowed-runs-on in ${filePath} must be a list of runs-on ` +
+                    `values; ${JSON.stringify(item)} is not one`,
             );
         }
     }
-    return value;
+    return {allowedRunsOn: list};
 }
 
 /**
- * The CLI arguments that repeat this run's options, for the "run this
- * locally" hint. Each value is single-quoted for a POSIX shell.
+ * Read and parse the config at `filePath` (relative to the repo root). A
+ * missing file means no settings, unless `required` is set, which callers do
+ * when the path was given explicitly: naming a file that isn't there is a
+ * mistake, not a request for the defaults.
  */
-export function cliArgs({
-    checkRunsOn: shouldCheckRunsOn = false,
-    allowedRunsOn = [],
-    setupAction = DEFAULT_SETUP_ACTION,
-}: {
+export function readConfig(
+    filePath: string,
+    {required = false}: {required?: boolean} = {},
+): Config {
+    let text: string;
+    try {
+        text = fs.readFileSync(path.resolve(repoRoot, filePath), "utf8");
+    } catch (err: any) {
+        if (err?.code !== "ENOENT") {
+            throw err;
+        }
+        if (required) {
+            throw new Error(`The config file ${filePath} does not exist.`);
+        }
+        return {allowedRunsOn: []};
+    }
+    return parseConfig(text, filePath);
+}
+
+export type Options = {
+    /** Whether to check `runs-on` against the allowlist. */
     checkRunsOn?: boolean;
-    allowedRunsOn?: readonly string[];
+    /** The config file; empty means DEFAULT_CONFIG_FILE, if it exists. */
+    configFile?: string;
     setupAction?: string;
-}): string {
-    const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
-    return [
-        ...(shouldCheckRunsOn ? ["--check-runs-on"] : []),
-        ...allowedRunsOn.map((value) => `--allowed-runs-on ${quote(value)}`),
-        `--setup-action ${quote(setupAction)}`,
-    ].join(" ");
+};
+
+/**
+ * Parse the CLI's arguments (without the leading `node` and script path).
+ * `--fix-runs-on` is the pre-v4 name for `--check-runs-on`.
+ */
+export function parseCliArgs(args: readonly string[]): Required<Options> {
+    const options: Required<Options> = {
+        checkRunsOn: false,
+        configFile: "",
+        setupAction: DEFAULT_SETUP_ACTION,
+    };
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === "--check-runs-on" || arg === "--fix-runs-on") {
+            options.checkRunsOn = true;
+        } else if (arg === "--config-file" && i + 1 < args.length) {
+            options.configFile = args[++i]!;
+        } else if (arg === "--setup-action" && i + 1 < args.length) {
+            options.setupAction = args[++i]!;
+        }
+    }
+    return options;
 }
 
 /**
@@ -529,9 +590,9 @@ export function runsOnViolationMessage(
     const list = [...allowed].map((value) => `  ${value}`).join("\n");
     return (
         `Job '${violation.jobId}' has runs-on '${violation.runsOn}', which ` +
-        `is not in allowed-runs-on. Use one of the allowed values ` +
-        `(matched exactly, including spacing):\n${list}\n` +
-        `Or add it to allowed-runs-on, or add a ` +
+        `is not an allowed value. Use one of these (matched exactly, ` +
+        `including spacing):\n${list}\n` +
+        `Or add it to allowed-runs-on in the config file, or add a ` +
         `'# fix-workflows-ignore: runs-on' comment to the runs-on line.`
     );
 }
@@ -618,6 +679,7 @@ export type AnnotationProperties = {
 
 type CoreLike = {
     info: (message: string) => void;
+    warning: (message: string) => void;
     error: (message: string, properties?: AnnotationProperties) => void;
     setFailed: (message: string) => void;
 };
@@ -625,62 +687,68 @@ type CoreLike = {
 export default async function fixWorkflows({
     core,
     checkRunsOn: shouldCheckRunsOn = false,
-    allowedRunsOn: allowedRunsOnList = [],
+    configFile = "",
     setupAction = DEFAULT_SETUP_ACTION,
-}: {
-    core: CoreLike;
-    /** Whether to check `runs-on` against the allowlist. */
-    checkRunsOn?: boolean;
-    /** The allowed `runs-on` values; empty means DEFAULT_ALLOWED_RUNS_ON. */
-    allowedRunsOn?: readonly string[];
-    setupAction?: string;
-}): Promise<void> {
+}: Options & {core: CoreLike}): Promise<void> {
+    const configPath = configFile || DEFAULT_CONFIG_FILE;
+    // Read the config before touching any file, so a broken one fails the run
+    // without leaving half-applied fixes behind.
+    const config = readConfig(configPath, {required: configFile !== ""});
+    if (!shouldCheckRunsOn && config.allowedRunsOn.length > 0) {
+        core.warning(
+            `${configPath} lists allowed-runs-on, but check-runs-on is off, ` +
+                `so runs-on values aren't checked.`,
+        );
+    }
     const allowedRunsOn = new Set(
-        allowedRunsOnList.length > 0
-            ? allowedRunsOnList
+        config.allowedRunsOn.length > 0
+            ? config.allowedRunsOn
             : DEFAULT_ALLOWED_RUNS_ON,
     );
     const files = getFilesToCheck();
     let fixedCount = 0;
+    let runsOnViolationCount = 0;
 
     for (const file of files) {
+        // Check runs-on before the setup autofix rewrites the file: inserted
+        // steps would shift the lines, and GitHub shows annotations against
+        // the committed file. The autofix never changes runs-on, so the
+        // result is the same either way.
+        if (shouldCheckRunsOn) {
+            const content = fs.readFileSync(path.join(repoRoot, file), "utf8");
+            const lineCounter = new LineCounter();
+            const doc = parseDocument(content, {lineCounter});
+            for (const violation of findRunsOnViolations(
+                doc,
+                allowedRunsOn,
+                lineCounter,
+            )) {
+                core.error(runsOnViolationMessage(violation, allowedRunsOn), {
+                    file,
+                    startLine: violation.line,
+                });
+                runsOnViolationCount++;
+            }
+        }
         if (processFile(file, {setupAction})) {
             fixedCount++;
         }
     }
 
-    // Verify no violations remain by re-parsing.
+    // Verify no setup-step violations remain by re-parsing.
     const stillBroken: string[] = [];
-    let runsOnViolationCount = 0;
     for (const file of files) {
         const content = fs.readFileSync(path.join(repoRoot, file), "utf8");
-        const lineCounter = new LineCounter();
-        const doc = parseDocument(content, {lineCounter});
-
-        let broken = false;
+        const doc = parseDocument(content);
         const jobs = doc.get("jobs");
-        if (isMap(jobs)) {
-            for (const item of jobs.items) {
-                if (
+        if (
+            isMap(jobs) &&
+            jobs.items.some(
+                (item) =>
                     isMap(item.value) &&
-                    checkJob(item.value as YAMLMap, {setupAction})
-                ) {
-                    broken = true;
-                    break;
-                }
-            }
-        }
-        const violations = shouldCheckRunsOn
-            ? findRunsOnViolations(doc, allowedRunsOn, lineCounter)
-            : [];
-        for (const violation of violations) {
-            core.error(runsOnViolationMessage(violation, allowedRunsOn), {
-                file,
-                startLine: violation.line,
-            });
-            runsOnViolationCount++;
-        }
-        if (broken) {
+                    checkJob(item.value as YAMLMap, {setupAction}),
+            )
+        ) {
             stillBroken.push(file);
         }
     }
@@ -695,7 +763,7 @@ export default async function fixWorkflows({
     }
     if (runsOnViolationCount > 0) {
         failures.push(
-            `${runsOnViolationCount} runs-on value(s) are not in allowed-runs-on; see the errors above.`,
+            `${runsOnViolationCount} runs-on value(s) are not allowed; see the errors above.`,
         );
     }
     if (failures.length > 0) {
