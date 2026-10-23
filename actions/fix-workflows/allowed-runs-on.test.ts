@@ -265,6 +265,18 @@ jobs:
         expect(job.get("runs-on")).toBe("ubuntu-latest-l");
         expect(checkJob(job)).toBe(false);
     });
+
+    it("rejects the fixRunsOn option on checkJob, which would ignore it", () => {
+        const {job} = parseJob(`
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: []
+`);
+        const fix = {allowed: ALLOWED, replacement: "ubuntu-latest"};
+        // @ts-expect-error checkJob only verifies setup steps.
+        expect(checkJob(job, {fixRunsOn: fix})).toBe(false);
+    });
 });
 
 describe("fixWorkflows", () => {
@@ -441,6 +453,24 @@ jobs:
         );
     });
 
+    // The default list rewrites every runs-on but the toggle, so that has to
+    // stand out; a run that changed nothing only notes it.
+    it("warns, with a count, when the default list rewrote runs-on", async () => {
+        const core = await run(
+            {[CI]: workflow("ubuntu-latest-l")},
+            {fixRunsOn: true},
+        );
+        expect(core.warning).toHaveBeenCalledWith(
+            expect.stringContaining("Rewrote 1 runs-on value(s)"),
+        );
+        expect(core.warning.mock.calls[0]![0]).toContain(
+            "No .github/fix-workflows.yml",
+        );
+        expect(core.info).not.toHaveBeenCalledWith(
+            expect.stringContaining("allowing only the default"),
+        );
+    });
+
     it.each([
         ["there's no config", {}, "No .github/fix-workflows.yml"],
         [
@@ -458,6 +488,7 @@ jobs:
             expect(core.info).toHaveBeenCalledWith(
                 expect.stringContaining(message),
             );
+            expect(core.warning).not.toHaveBeenCalled();
             expect(core.setFailed).not.toHaveBeenCalled();
         },
     );
@@ -529,7 +560,19 @@ describe("action.yml", () => {
         expect(step("Fix workflow violations").with.script).toContain(
             `fixRunsOn: ${expr},`,
         );
-        expect(step("Show fix instructions").env.FIX_RUNS_ON).toBe(expr);
+        expect(step("Show fix instructions").env).toEqual({
+            FIX_RUNS_ON: expr,
+            CONFIG_FILE: "${{ inputs.config-file }}",
+            SETUP_ACTION: "${{ inputs.setup-action }}",
+        });
+    });
+
+    // Awaiting is what routes the fixer's async errors (a broken config, say)
+    // into the catch and so into setFailed.
+    it("awaits the fixer", () => {
+        expect(step("Fix workflow violations").with.script).toContain(
+            "await require('./actions/fix-workflows/index.js').default(",
+        );
     });
 
     // A quote or `${` in a string input would run as JS if spliced into the
@@ -542,10 +585,17 @@ describe("action.yml", () => {
         });
         expect(fix.with.script).not.toContain("${{ inputs.config-file");
         expect(fix.with.script).not.toContain("${{ inputs.setup-action");
+        expect(fix.with.script).toContain(
+            "configFile: process.env.CONFIG_FILE,",
+        );
+        expect(fix.with.script).toContain(
+            "setupAction: process.env.SETUP_ACTION,",
+        );
     });
 
-    // Run the hint step's flag-building lines in bash, then parse the flags the
-    // way the CLI does, so the hint and the CLI can't drift apart.
+    // Run the hint step's command-building lines in bash, then parse the
+    // command the way a shell and the CLI would, so the hint and the CLI can't
+    // drift apart.
     it.each([
         [{FIX_RUNS_ON: "false", CONFIG_FILE: "", SETUP_ACTION: "Khan/a@v1"}],
         [
@@ -555,18 +605,27 @@ describe("action.yml", () => {
                 SETUP_ACTION: "./.github/actions/setup",
             },
         ],
-    ])("prints hint flags the CLI parses back: %o", (env) => {
+    ])("prints a hint command the CLI parses back: %o", (env) => {
         const script: string = step("Show fix instructions").run;
         const build = script.slice(
             script.indexOf('ARGS=""'),
-            script.indexOf("CMD="),
+            script.indexOf("HINT="),
         );
         const out = execFileSync(
             "bash",
-            ["-c", `${build}\neval "set -- $ARGS"; printf '%s\\0' "$@"`],
-            {env: {...process.env, ...env}, encoding: "utf8"},
+            ["-c", `${build}\neval "set -- $CMD"; printf '%s\\0' "$@"`],
+            {
+                env: {...process.env, ...env, TAG: "fix-workflows-v4"},
+                encoding: "utf8",
+            },
         );
-        expect(parseCliArgs(out.split("\0").slice(0, -1))).toEqual({
+        const [pnpm, dlx, pkg, ...args] = out.split("\0").slice(0, -1);
+        expect([pnpm, dlx, pkg]).toEqual([
+            "pnpm",
+            "dlx",
+            "github:Khan/actions#fix-workflows-v4",
+        ]);
+        expect(parseCliArgs(args)).toEqual({
             fixRunsOn: env.FIX_RUNS_ON === "true",
             configFile: env.CONFIG_FILE,
             setupAction: env.SETUP_ACTION,

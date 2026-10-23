@@ -22,7 +22,8 @@ inputs:
             used if it exists. With no file or no list, the only allowed value
             (and what fix-runs-on writes) is
             `${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}`.
-            A path given here must exist.
+            A path given here must exist. Ignored, and not read, when
+            fix-runs-on is off.
         required: false
         default: ""
     setup-action:

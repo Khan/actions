@@ -34,10 +34,11 @@ a typo can't fall back to the default list.
 
 With no config file, or no `allowed-runs-on` entries, the only allowed value, and
 the replacement, is the `ubuntu-latest` form of the toggle,
-`${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}`,
-and the run logs that it is using it. The pre-v4 regex accepted that toggle with any
-runner name, so a repo that uses it with another runner (such as `'ubuntu-latest-l'`)
-has to list that form in the config. A `config-file` given explicitly must exist.
+`${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}`.
+The run warns, with a count, when that default rewrote anything, and otherwise just
+logs that it used it. The pre-v4 regex accepted that toggle with any runner name, so
+a repo that uses it with another runner (such as `'ubuntu-latest-l'`) has to list
+that form in the config. A `config-file` given explicitly must exist.
 With `fix-runs-on` off, the config is neither read nor validated, so a mistake in it
 can't fail the run; if it exists, the run warns that it isn't being used.
 
