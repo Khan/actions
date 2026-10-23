@@ -101,23 +101,31 @@ describe("parseCliArgs", () => {
     });
 
     it.each([
-        [["--config-file"]],
-        [["--config-file", "--fix-runs-on"]],
-        [["--setup-action"]],
-    ])("throws when a flag is missing its value: %o", (args) => {
-        expect(() => parseCliArgs(args)).toThrow(`${args[0]} needs a value`);
+        [["--config-file"], "argument missing"],
+        // Not taken as --config-file's value, which would turn the fix off.
+        [["--config-file", "--fix-runs-on"], "argument is ambiguous"],
+        [["--setup-action"], "argument missing"],
+    ])("throws when a flag is missing its value: %o", (args, message) => {
+        expect(() => parseCliArgs(args)).toThrow(message);
     });
 
     // As with the config's unknown keys, a typo mustn't quietly leave the
     // fix off.
-    it.each([["--fix-runs-on=true"], ["--fix-run-on"], ["extra"]])(
-        "throws on an unknown argument: %s",
-        (arg) => {
-            expect(() => parseCliArgs([arg])).toThrow(
-                `Unknown argument ${arg}`,
-            );
-        },
-    );
+    it.each([
+        ["--fix-runs-on=true", "does not take an argument"],
+        ["--fix-run-on", "Unknown option '--fix-run-on'"],
+        ["extra", "Unexpected argument 'extra'"],
+    ])("throws on a bad argument: %s", (arg, message) => {
+        expect(() => parseCliArgs([arg])).toThrow(message);
+    });
+
+    it("accepts a value given with =", () => {
+        expect(parseCliArgs(["--config-file=ci/fix-workflows.yml"])).toEqual({
+            fixRunsOn: false,
+            configFile: "ci/fix-workflows.yml",
+            setupAction: DEFAULT_SETUP_ACTION,
+        });
+    });
 
     it("reads --config-file and --setup-action", () => {
         expect(

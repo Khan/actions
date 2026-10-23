@@ -19,6 +19,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {parseArgs} from "node:util";
 
 import {
     isMap,
@@ -621,37 +622,25 @@ export type Options = {
 
 /**
  * Parse the CLI's arguments (without the leading `node` and script path).
- * An unknown argument or a flag missing its value throws rather than quietly
- * falling back to the default.
+ * Strict, so an unknown flag, a stray positional argument, or a flag missing
+ * its value throws rather than quietly falling back to the default.
  */
 export function parseCliArgs(args: readonly string[]): Required<Options> {
-    const options: Required<Options> = {
-        fixRunsOn: false,
-        configFile: "",
-        setupAction: DEFAULT_SETUP_ACTION,
+    const {values} = parseArgs({
+        args: [...args],
+        options: {
+            "fix-runs-on": {type: "boolean", default: false},
+            "config-file": {type: "string", default: ""},
+            "setup-action": {type: "string", default: DEFAULT_SETUP_ACTION},
+        },
+        strict: true,
+        allowPositionals: false,
+    });
+    return {
+        fixRunsOn: values["fix-runs-on"],
+        configFile: values["config-file"],
+        setupAction: values["setup-action"],
     };
-    const valueOf = (i: number): string => {
-        const value = args[i + 1];
-        if (value === undefined || value.startsWith("--")) {
-            throw new Error(`${args[i]} needs a value`);
-        }
-        return value;
-    };
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-        if (arg === "--fix-runs-on") {
-            options.fixRunsOn = true;
-        } else if (arg === "--config-file") {
-            options.configFile = valueOf(i++);
-        } else if (arg === "--setup-action") {
-            options.setupAction = valueOf(i++);
-        } else {
-            // Every token reaching here is meant as a flag (values are
-            // consumed above), so this is a typo or `--flag=value`.
-            throw new Error(`Unknown argument ${arg}`);
-        }
-    }
-    return options;
 }
 
 type CoreLike = {
