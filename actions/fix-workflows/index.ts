@@ -532,10 +532,10 @@ export function fixRunsOn(
 type JobOptions = {
     setupAction?: string;
     /**
-     * When given, replace disallowed `runs-on` values (see fixRunsOn), calling
-     * `onFix` for each one replaced.
+     * When given, `runs-on` values not in `allowed` are replaced with
+     * `replacement` (see fixRunsOn), calling `onFix` for each one.
      */
-    fixRunsOn?:
+    runsOnPolicy?:
         | {
               allowed: ReadonlySet<string>;
               replacement: string;
@@ -551,14 +551,17 @@ type JobOptions = {
 export function processJob(
     doc: Document,
     job: YAMLMap,
-    {setupAction = DEFAULT_SETUP_ACTION, fixRunsOn: runsOnFix}: JobOptions = {},
+    {setupAction = DEFAULT_SETUP_ACTION, runsOnPolicy}: JobOptions = {},
 ): boolean {
     if (isExemptRunner(job)) {
         return false;
     }
     let changed = false;
-    if (runsOnFix && fixRunsOn(job, runsOnFix.allowed, runsOnFix.replacement)) {
-        runsOnFix.onFix?.();
+    if (
+        runsOnPolicy &&
+        fixRunsOn(job, runsOnPolicy.allowed, runsOnPolicy.replacement)
+    ) {
+        runsOnPolicy.onFix?.();
         changed = true;
     }
     const steps = (job as any).get("steps");
@@ -666,10 +669,10 @@ export default async function fixWorkflows({
     setupAction = DEFAULT_SETUP_ACTION,
 }: Options & {core: CoreLike}): Promise<void> {
     const configPath = configFile || DEFAULT_CONFIG_FILE;
-    let runsOnFix: JobOptions["fixRunsOn"];
+    let runsOnPolicy: JobOptions["runsOnPolicy"];
     // Why the default list is in use, if it is.
     let usingDefault: string | null = null;
-    let runsOnFixed = 0;
+    let runsOnFixedCount = 0;
     if (shouldFixRunsOn) {
         // Read the config before touching any file, so a broken one fails
         // the run without leaving half-applied fixes behind.
@@ -684,10 +687,10 @@ export default async function fixWorkflows({
         }
         // Disallowed values become the first entry, so a repo lists the
         // runner it wants unlisted jobs moved to first.
-        runsOnFix = {
+        runsOnPolicy = {
             allowed: new Set(allowedRunsOn),
             replacement: allowedRunsOn[0]!,
-            onFix: () => runsOnFixed++,
+            onFix: () => runsOnFixedCount++,
         };
     } else if (fs.existsSync(path.resolve(repoRoot, configPath))) {
         // The config only matters to fix-runs-on, so with it off the config
@@ -701,7 +704,7 @@ export default async function fixWorkflows({
     let fixedCount = 0;
 
     for (const file of files) {
-        if (processFile(file, {setupAction, fixRunsOn: runsOnFix})) {
+        if (processFile(file, {setupAction, runsOnPolicy})) {
             fixedCount++;
         }
     }
@@ -712,9 +715,9 @@ export default async function fixWorkflows({
         const message =
             `${usingDefault}; allowing only the default runs-on: ` +
             DEFAULT_ALLOWED_RUNS_ON.join(", ");
-        if (runsOnFixed > 0) {
+        if (runsOnFixedCount > 0) {
             core.warning(
-                `${message}. Rewrote ${runsOnFixed} runs-on value(s) to it; ` +
+                `${message}. Rewrote ${runsOnFixedCount} runs-on value(s) to it; ` +
                     `list the runners your workflows use under ` +
                     `allowed-runs-on in ${configPath} to keep them.`,
             );

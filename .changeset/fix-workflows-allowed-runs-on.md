@@ -46,8 +46,8 @@ Only string `runs-on` values are checked. A label array (`[self-hosted, linux]`)
 or a `group:` map is left alone, as before.
 
 `fixRunsOn` and `checkRunsOn` now take the allowed set (and `fixRunsOn` the
-replacement). `processJob` takes `fixRunsOn: {allowed, replacement}` in place of
-`shouldFixRunsOn`, and `checkJob` no longer takes `shouldFixRunsOn`.
+replacement). `processJob` takes `runsOnPolicy: {allowed, replacement, onFix?}` in
+place of `shouldFixRunsOn`, and `checkJob` no longer takes `shouldFixRunsOn`.
 
 `setup-action` now reaches the fixer's script through the environment instead of
 being pasted into its source. The CLI now rejects an unknown argument or a flag

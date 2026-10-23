@@ -253,8 +253,8 @@ jobs:
 });
 
 describe("processJob and checkJob", () => {
-    // Without the fixRunsOn option (fix-runs-on off), runs-on is left alone.
-    it("leave a runs-on untouched without the fixRunsOn option", () => {
+    // Without a runsOnPolicy (fix-runs-on off), runs-on is left alone.
+    it("leave a runs-on untouched without a runsOnPolicy", () => {
         const {doc, job} = parseJob(`
 jobs:
   build:
@@ -266,16 +266,16 @@ jobs:
         expect(checkJob(job)).toBe(false);
     });
 
-    it("rejects the fixRunsOn option on checkJob, which would ignore it", () => {
+    it("rejects the runsOnPolicy option on checkJob, which would ignore it", () => {
         const {job} = parseJob(`
 jobs:
   build:
     runs-on: ubuntu-latest
     steps: []
 `);
-        const fix = {allowed: ALLOWED, replacement: "ubuntu-latest"};
+        const policy = {allowed: ALLOWED, replacement: "ubuntu-latest"};
         // @ts-expect-error checkJob only verifies setup steps.
-        expect(checkJob(job, {fixRunsOn: fix})).toBe(false);
+        expect(checkJob(job, {runsOnPolicy: policy})).toBe(false);
     });
 });
 
@@ -347,6 +347,12 @@ jobs:
         expect(runsOnOf()).toBe("ubuntu-latest");
         expect(core.setFailed).not.toHaveBeenCalled();
         expect(core.info).toHaveBeenCalledWith("Fixed 1 file(s).");
+        // The config lists runners, so nothing says it fell back to the
+        // default, even though this run rewrote a runs-on.
+        expect(core.warning).not.toHaveBeenCalled();
+        expect(core.info).not.toHaveBeenCalledWith(
+            expect.stringContaining("allowing only the default"),
+        );
     });
 
     it("leaves the file untouched when every runs-on is in the config", async () => {
