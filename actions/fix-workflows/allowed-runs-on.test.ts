@@ -549,30 +549,19 @@ describe("action.yml", () => {
         action.runs.steps.find((s: {name: string}) => s.name === name);
 
     // No description may hold `${{` (see utils/action-descriptions.test.ts),
-    // so the config-file description names each default by the expression
-    // inside its braces and points at the 4.0.0 CHANGELOG entry for a copy
-    // with them. Pin both, so the pointer can't go stale.
+    // so the config-file description gives the default toggle in words and
+    // leaves the full text to the run's log. Pinning the default here means
+    // changing it fails this test until the words are updated to match.
     it("documents DEFAULT_CONFIG_FILE and DEFAULT_ALLOWED_RUNS_ON", () => {
         const {description} = action.inputs["config-file"];
         expect(description).toContain(DEFAULT_CONFIG_FILE);
+        expect(DEFAULT_ALLOWED_RUNS_ON).toEqual([
+            "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}",
+        ]);
         expect(description).toContain(
-            "the 4.0.0 entry in this action's CHANGELOG.md",
+            "the `ubuntu-latest` form of the `USE_GITHUB_RUNNERS` / `ephemeral-runner` toggle",
         );
-        const changelog = fs.readFileSync(
-            new URL("./CHANGELOG.md", import.meta.url),
-            "utf-8",
-        );
-        const entry = changelog
-            .split(/^## /m)
-            .find((s) => s.startsWith("4.0.0"));
-        for (const value of DEFAULT_ALLOWED_RUNS_ON) {
-            const inner = value
-                .replace(/^\$\{\{\s*/, "")
-                .replace(/\s*\}\}$/, "");
-            expect(inner).not.toBe(value);
-            expect(description).toContain(inner);
-            expect(entry).toContain(value);
-        }
+        expect(description).toContain("the run's log prints it in full");
     });
 
     it("leaves fix-runs-on off by default, as before v4", () => {
