@@ -1,7 +1,9 @@
-import {describe, expect, it} from "vitest";
+import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import * as realFs from "node:fs";
 import path from "node:path";
 import {parse} from "yaml";
+
+import {processActionYml} from "./build.ts";
 
 // The runner parses `${{` in some of an action's descriptions (an input's, at
 // least) as an expression when it loads the action, and only a few contexts
@@ -16,6 +18,11 @@ import {parse} from "yaml";
 // every description. A description is documentation, shown as raw text, so it
 // never needs a live expression: name one some other way, e.g. by the text
 // inside its braces. (`${{` is fine in `outputs.*.value` and in `runs:`.)
+//
+// The runner loads the published action.yml, not the source: publishing
+// rewrites the first `./actions/<name>/` in the file to
+// `${{ github.action_path }}/` (see processActionYml), wherever it is. So each
+// action is checked both as written and as published.
 
 type Described = {description?: unknown};
 
@@ -53,22 +60,80 @@ function descriptions(action: ActionYml): Array<[string, unknown]> {
     ];
 }
 
+/**
+ * An action.yml as publishing rewrites it. With no package metadata, every
+ * `uses: ./actions/...` dependency is left alone (those rewrites only add a
+ * SHA and a comment), so this applies just the require-path rewrite.
+ */
+function asPublished(name: string, actionYml: string): string {
+    return processActionYml(name, {}, actionYml, "Khan/actions");
+}
+
+/** The descriptions in `actionYml` that contain `${{`, keyed by where. */
+function descriptionsWithExpressions(actionYml: string): string[] {
+    return descriptions(parse(actionYml))
+        .filter(([, description]) => String(description ?? "").includes("${{"))
+        .map(([where]) => where);
+}
+
 describe("action.yml descriptions", () => {
+    // processActionYml logs each rewrite.
+    beforeEach(() => {
+        vi.spyOn(console, "log").mockImplementation(() => {});
+    });
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     it("finds the repo's actions", () => {
         expect(actionNames).toContain("fix-workflows");
     });
 
-    it.each(actionNames)("%s has no `${{` in any description", (name) => {
-        const action: ActionYml = parse(
-            realFs.readFileSync(
+    // Without this, the check below would pass if descriptions() stopped
+    // finding any descriptions.
+    it("finds every description it should check", () => {
+        const action: ActionYml = {
+            description: "a ${{ vars.X }}",
+            inputs: {i: {description: "b ${{ vars.X }}"}},
+            outputs: {o: {description: "c ${{ vars.X }}"}},
+        };
+        expect(descriptions(action)).toEqual([
+            ["description", "a ${{ vars.X }}"],
+            ["inputs.i.description", "b ${{ vars.X }}"],
+            ["outputs.o.description", "c ${{ vars.X }}"],
+        ]);
+    });
+
+    it("catches a `${{` that only publishing adds", () => {
+        const actionYml = [
+            "name: Example",
+            "description: Loads ./actions/example/index.js.",
+            "runs:",
+            '    using: "composite"',
+            "    steps: []",
+            "",
+        ].join("\n");
+        expect(descriptionsWithExpressions(actionYml)).toEqual([]);
+        expect(
+            descriptionsWithExpressions(asPublished("example", actionYml)),
+        ).toEqual(["description"]);
+    });
+
+    it.each(actionNames)(
+        "%s has no `${{` in any description, as written or as published",
+        (name) => {
+            const actionYml = realFs.readFileSync(
                 path.join(actionsDir, name, "action.yml"),
                 "utf-8",
-            ),
-        );
-        for (const [where, description] of descriptions(action)) {
-            expect(String(description ?? ""), `${name} ${where}`).not.toContain(
-                "${{",
             );
-        }
-    });
+            expect(
+                descriptionsWithExpressions(actionYml),
+                "as written",
+            ).toEqual([]);
+            expect(
+                descriptionsWithExpressions(asPublished(name, actionYml)),
+                "as published",
+            ).toEqual([]);
+        },
+    );
 });
