@@ -4,9 +4,7 @@ import {isMap, isSeq, parseDocument} from "yaml";
 import {
     DEFAULT_SETUP_ACTION,
     checkJob,
-    checkRunsOn,
     checkSteps,
-    fixRunsOn,
     fixSteps,
     isExemptRunner,
     processJob,
@@ -490,20 +488,6 @@ jobs:
     });
 });
 
-describe("checkRunsOn and fixRunsOn with ignore directives", () => {
-    it("treats an ignored plain runner as compliant and leaves it untouched", () => {
-        const job = parseWorkflowJob(`
-jobs:
-  build:
-    runs-on: ubuntu-latest-m # fix-workflows-ignore
-    steps: []
-`);
-        expect(checkRunsOn(job)).toBe(false);
-        expect(fixRunsOn(job)).toBe(false);
-        expect(job.get("runs-on")).toBe("ubuntu-latest-m");
-    });
-});
-
 describe("stepIgnoresSetup", () => {
     // Each suffix is spliced onto `uses: actions/checkout@v4<suffix>`.
     it.each([
@@ -573,18 +557,6 @@ jobs:
 });
 
 describe("processJob and checkJob with ignore directives", () => {
-    it("does not rewrite an ignored runs-on when shouldFixRunsOn is true", () => {
-        const {doc, job} = parseWorkflowJobWithDoc(`
-jobs:
-  build:
-    runs-on: ubuntu-latest-m # fix-workflows-ignore
-    steps: []
-`);
-        expect(processJob(doc, job, {shouldFixRunsOn: true})).toBe(false);
-        expect(job.get("runs-on")).toBe("ubuntu-latest-m");
-        expect(checkJob(job, {shouldFixRunsOn: true})).toBe(false);
-    });
-
     it("does not insert a setup step for a checkout with a setup-scoped ignore", () => {
         const {doc, job} = parseWorkflowJobWithDoc(`
 jobs:
@@ -650,174 +622,6 @@ jobs:
 });
 
 // ---------------------------------------------------------------------------
-// checkRunsOn
-// ---------------------------------------------------------------------------
-
-describe("checkRunsOn", () => {
-    it.each([
-        [
-            "returns false for the standard conditional expression",
-            `
-jobs:
-  build:
-    runs-on: "\${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}"
-    steps: []
-`,
-            false,
-        ],
-        [
-            "returns false for a large-runner conditional expression",
-            `
-jobs:
-  build:
-    runs-on: "\${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest-l' || 'ephemeral-runner' }}"
-    steps: []
-`,
-            false,
-        ],
-        [
-            "returns false for a matrix-specific runner conditional expression",
-            `
-jobs:
-  build:
-    runs-on: "\${{ (matrix.language == 'go' && matrix.type == 'tests') && 'ubuntu-latest' || vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}"
-    steps: []
-`,
-            false,
-        ],
-        [
-            "returns true for a plain ubuntu-latest string",
-            `
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps: []
-`,
-            true,
-        ],
-        [
-            "returns true for a plain ubuntu-latest-l string",
-            `
-jobs:
-  build:
-    runs-on: ubuntu-latest-l
-    steps: []
-`,
-            true,
-        ],
-        [
-            "returns false for a macos- runner",
-            `
-jobs:
-  build:
-    runs-on: macos-latest
-    steps: []
-`,
-            false,
-        ],
-        [
-            "returns false for a versioned macos- runner",
-            `
-jobs:
-  build:
-    runs-on: macos-15
-    steps: []
-`,
-            false,
-        ],
-    ])("%s", (_name, yaml, expected) => {
-        // Arrange
-        const job = parseWorkflowJob(yaml);
-
-        // Act
-        const result = checkRunsOn(job);
-
-        // Assert
-        expect(result).toBe(expected);
-    });
-});
-
-// ---------------------------------------------------------------------------
-// fixRunsOn
-// ---------------------------------------------------------------------------
-
-describe("fixRunsOn", () => {
-    it("returns false and leaves runs-on unchanged when already using the conditional expression", () => {
-        // Arrange
-        const job = parseWorkflowJob(`
-jobs:
-  build:
-    runs-on: "\${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}"
-    steps: []
-`);
-
-        // Act
-        const result = fixRunsOn(job);
-
-        // Assert
-        expect(result).toBe(false);
-        expect(job.get("runs-on")).toBe(
-            "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}",
-        );
-    });
-
-    it("replaces ubuntu-latest with the conditional expression", () => {
-        // Arrange
-        const job = parseWorkflowJob(`
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps: []
-`);
-
-        // Act
-        const result = fixRunsOn(job);
-
-        // Assert
-        expect(result).toBe(true);
-        expect(job.get("runs-on")).toBe(
-            "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}",
-        );
-    });
-
-    it("returns false and leaves runs-on unchanged for a macos- runner", () => {
-        // Arrange
-        const job = parseWorkflowJob(`
-jobs:
-  build:
-    runs-on: macos-latest
-    steps: []
-`);
-
-        // Act
-        const result = fixRunsOn(job);
-
-        // Assert
-        expect(result).toBe(false);
-        expect(job.get("runs-on")).toBe("macos-latest");
-    });
-
-    it("replaces ubuntu-latest-l with the large-runner conditional expression", () => {
-        // Arrange
-        const job = parseWorkflowJob(`
-jobs:
-  build:
-    runs-on: ubuntu-latest-l
-    steps: []
-`);
-
-        // Act
-        const result = fixRunsOn(job);
-
-        // Assert
-        expect(result).toBe(true);
-        expect(job.get("runs-on")).toBe(
-            "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest-l' || 'ephemeral-runner' }}",
-        );
-    });
-});
-
-// ---------------------------------------------------------------------------
 // processJob
 // ---------------------------------------------------------------------------
 
@@ -869,42 +673,6 @@ jobs:
             "timeout-minutes": 5,
         });
     });
-
-    it("fixes runs-on when shouldFixRunsOn is true and runner is non-exempt", () => {
-        // Arrange
-        const {doc, job} = parseWorkflowJobWithDoc(`
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps: []
-`);
-
-        // Act
-        const result = processJob(doc, job, {shouldFixRunsOn: true});
-
-        // Assert
-        expect(result).toBe(true);
-        expect(job.get("runs-on")).toBe(
-            "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}",
-        );
-    });
-
-    it("does not fix runs-on for a macos- runner even when shouldFixRunsOn is true", () => {
-        // Arrange
-        const {doc, job} = parseWorkflowJobWithDoc(`
-jobs:
-  build:
-    runs-on: macos-latest
-    steps: []
-`);
-
-        // Act
-        const result = processJob(doc, job, {shouldFixRunsOn: true});
-
-        // Assert
-        expect(result).toBe(false);
-        expect(job.get("runs-on")).toBe("macos-latest");
-    });
 });
 
 // ---------------------------------------------------------------------------
@@ -929,19 +697,6 @@ jobs:
         expect(checkJob(job)).toBe(false);
     });
 
-    it("returns false for a macos- runner even when shouldFixRunsOn is true", () => {
-        // Arrange
-        const job = parseWorkflowJob(`
-jobs:
-  build:
-    runs-on: macos-latest
-    steps: []
-`);
-
-        // Act & Assert
-        expect(checkJob(job, {shouldFixRunsOn: true})).toBe(false);
-    });
-
     it("returns true for a non-exempt runner missing the secure-network step", () => {
         // Arrange
         const job = parseWorkflowJob(`
@@ -959,19 +714,6 @@ jobs:
         expect(checkJob(job)).toBe(true);
     });
 
-    it("returns true for a non-exempt runner with a plain runs-on when shouldFixRunsOn is true", () => {
-        // Arrange
-        const job = parseWorkflowJob(`
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps: []
-`);
-
-        // Act & Assert
-        expect(checkJob(job, {shouldFixRunsOn: true})).toBe(true);
-    });
-
     it("returns false when there are no violations", () => {
         // Arrange
         const job = parseWorkflowJob(`
@@ -987,6 +729,6 @@ jobs:
 `);
 
         // Act & Assert
-        expect(checkJob(job, {shouldFixRunsOn: true})).toBe(false);
+        expect(checkJob(job)).toBe(false);
     });
 });

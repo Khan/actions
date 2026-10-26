@@ -3,7 +3,12 @@
  * CLI entrypoint for fix-workflows.
  *
  * Usage:
- *   pnpm dlx fix-workflows [--fix-runs-on] [--setup-action <action>]
+ *   pnpm dlx fix-workflows [--fix-runs-on] [--config-file <path>]
+ *       [--setup-action <action>]
+ *
+ * `--fix-runs-on` replaces every runs-on that isn't on the allowed-runs-on
+ * list in the config file (.github/fix-workflows.yml unless --config-file
+ * says otherwise) with the list's first entry, so one run fixes a whole repo.
  *
  * Fixes workflow lint violations and then formats all workflow YAML files
  * with oxfmt. Runs from the current working directory, expecting
@@ -12,40 +17,26 @@
 import {execSync} from "node:child_process";
 import * as path from "node:path";
 
-import fixWorkflows, {
-    DEFAULT_SETUP_ACTION,
-    generatedWorkflowSkipGlobs,
-} from "./index";
+import fixWorkflows, {generatedWorkflowSkipGlobs, parseCliArgs} from "./index";
 
-function parseArgs(argv: string[]): {
-    fixRunsOn: boolean;
-    setupAction: string;
-} {
-    let fixRunsOn = false;
-    let setupAction = DEFAULT_SETUP_ACTION;
-
-    for (let i = 2; i < argv.length; i++) {
-        if (argv[i] === "--fix-runs-on") {
-            fixRunsOn = true;
-        } else if (argv[i] === "--setup-action" && i + 1 < argv.length) {
-            setupAction = argv[++i]!;
-        }
-    }
-
-    return {fixRunsOn, setupAction};
+let options: ReturnType<typeof parseCliArgs>;
+try {
+    options = parseCliArgs(process.argv.slice(2));
+} catch (err) {
+    console.error((err as Error).message); // eslint-disable-line no-console
+    process.exit(1);
 }
-
-const {fixRunsOn, setupAction} = parseArgs(process.argv);
 
 const core = {
     info: (message: string) => console.log(message), // eslint-disable-line no-console
+    warning: (message: string) => console.warn(message), // eslint-disable-line no-console
     setFailed: (message: string) => {
         console.error(message); // eslint-disable-line no-console
         process.exitCode = 1;
     },
 };
 
-fixWorkflows({core, fixRunsOn, setupAction})
+fixWorkflows({core, ...options})
     .then(() => {
         // Format workflow files with oxfmt after fixing lint violations, skipping
         // the generator-owned ones for the same reason the fixer does (see
