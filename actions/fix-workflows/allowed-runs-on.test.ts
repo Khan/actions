@@ -574,8 +574,6 @@ describe("action.yml", () => {
                 expect(description).toContain(`\`${name}\``);
             }
         }
-        expect(description).toContain("copy it from a workflow that uses it");
-        expect(description).toContain("the run's log also prints it in full");
     });
 
     it("leaves fix-runs-on off by default, as before v4", () => {

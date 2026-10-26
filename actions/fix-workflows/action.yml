@@ -17,23 +17,18 @@ inputs:
         # The default is described below rather than written out: the runner
         # parses `${{` in an input's description as an expression when it
         # loads the action, and `vars` isn't one of the contexts available
-        # there, so the action fails to load (as v4.0.0 did). Writing it
-        # without its braces would invite pasting a plain string into the
-        # config, which as the first entry fix-runs-on would write everywhere.
-        # utils/action-descriptions.test.ts bans `${{` in every description,
-        # whatever context it uses.
+        # there, so the action fails to load (as v4.0.0 did).
+        # utils/action-descriptions.test.ts bans `${{` in every description.
         description: >-
             Path, relative to the repo root, of a YAML file whose
-            `allowed-runs-on` key lists the exact runs-on values workflows may
-            use, copied as they appear in the workflows. The first entry is
-            what fix-runs-on writes. When empty, .github/fix-workflows.yml is
-            used if it exists. With no file or no list, the only allowed value,
-            and what fix-runs-on writes, is the `ubuntu-latest` form of the
-            `USE_GITHUB_RUNNERS` / `ephemeral-runner` toggle that fix-workflows
-            enforced before v4. To list it, copy it from a workflow that uses
-            it; the run's log also prints it in full when the default is in
-            use. A path given here must exist. Ignored, and not read, when
-            fix-runs-on is off.
+            `allowed-runs-on` key lists the runs-on values workflows may use,
+            each copied exactly as it appears in the workflows. fix-runs-on
+            replaces any other value with the first entry. Defaults to
+            .github/fix-workflows.yml if it exists; a path given here must
+            exist. With no file or no list, the only allowed value is the
+            pre-v4 default: the `USE_GITHUB_RUNNERS` toggle that picks
+            `ubuntu-latest` or `ephemeral-runner`. Ignored when fix-runs-on is
+            off.
         required: false
         default: ""
     setup-action:
