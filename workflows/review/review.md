@@ -39,7 +39,8 @@ on:
 if: >-
   !startsWith(github.event.pull_request.head.ref, 'deploy/') &&
   github.event.pull_request.head.ref != 'changeset-release/main' &&
-  !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
+  !contains(github.event.pull_request.labels.*.name, 'skip-ai-review') &&
+  !contains(fromJSON(vars.REVIEW_BETA_AUTHORS || '[]'), github.event.pull_request.user.login || github.event.issue.user.login)
 
 # Consumer-specific frontmatter is merged in at compile time from the consuming repo via
 # this import: the consumer's `add-reviewer` safe output, with its repo-specific
