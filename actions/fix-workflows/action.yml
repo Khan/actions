@@ -30,8 +30,9 @@ inputs:
             used if it exists. With no file or no list, the only allowed value,
             and what fix-runs-on writes, is the `ubuntu-latest` form of the
             `USE_GITHUB_RUNNERS` / `ephemeral-runner` toggle that fix-workflows
-            enforced before v4; the run's log prints it in full when it's
-            used. A path given here must exist. Ignored, and not read, when
+            enforced before v4. To list it, copy it from a workflow that uses
+            it; the run's log also prints it in full when the default is in
+            use. A path given here must exist. Ignored, and not read, when
             fix-runs-on is off.
         required: false
         default: ""

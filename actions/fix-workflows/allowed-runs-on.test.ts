@@ -494,6 +494,11 @@ jobs:
             expect(core.info).toHaveBeenCalledWith(
                 expect.stringContaining(message),
             );
+            // The config-file description tells readers this line has the
+            // default's full text, so it has to carry it.
+            expect(core.info).toHaveBeenCalledWith(
+                expect.stringContaining(TOGGLE),
+            );
             expect(core.warning).not.toHaveBeenCalled();
             expect(core.setFailed).not.toHaveBeenCalled();
         },
@@ -549,19 +554,28 @@ describe("action.yml", () => {
         action.runs.steps.find((s: {name: string}) => s.name === name);
 
     // No description may hold `${{` (see utils/action-descriptions.test.ts),
-    // so the config-file description gives the default toggle in words and
-    // leaves the full text to the run's log. Pinning the default here means
-    // changing it fails this test until the words are updated to match.
+    // so the config-file description names the default toggle in words. The
+    // words checked here come from DEFAULT_ALLOWED_RUNS_ON itself (each
+    // `vars.` name and each quoted runner name), so changing the default fails
+    // this test until the description is updated to match.
     it("documents DEFAULT_CONFIG_FILE and DEFAULT_ALLOWED_RUNS_ON", () => {
         const {description} = action.inputs["config-file"];
         expect(description).toContain(DEFAULT_CONFIG_FILE);
-        expect(DEFAULT_ALLOWED_RUNS_ON).toEqual([
-            "${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}",
-        ]);
-        expect(description).toContain(
-            "the `ubuntu-latest` form of the `USE_GITHUB_RUNNERS` / `ephemeral-runner` toggle",
-        );
-        expect(description).toContain("the run's log prints it in full");
+        for (const value of DEFAULT_ALLOWED_RUNS_ON) {
+            const names = [
+                ...[...value.matchAll(/\bvars\.(\w+)/g)].map((m) => m[1]),
+                ...[...value.matchAll(/'([^']+)'/g)]
+                    .map((m) => m[1])
+                    .filter((quoted) => quoted !== "true"),
+            ];
+            // Guards against the patterns above silently matching nothing.
+            expect(names).not.toEqual([]);
+            for (const name of names) {
+                expect(description).toContain(`\`${name}\``);
+            }
+        }
+        expect(description).toContain("copy it from a workflow that uses it");
+        expect(description).toContain("the run's log also prints it in full");
     });
 
     it("leaves fix-runs-on off by default, as before v4", () => {
