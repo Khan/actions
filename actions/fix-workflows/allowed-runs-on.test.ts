@@ -548,7 +548,7 @@ describe("action.yml", () => {
     const step = (name: string) =>
         action.runs.steps.find((s: {name: string}) => s.name === name);
 
-    // A description can't hold `${{` (see utils/action-descriptions.test.ts),
+    // No description may hold `${{` (see utils/action-descriptions.test.ts),
     // so the config-file description names each default by the expression
     // inside its braces and points at the 4.0.0 CHANGELOG entry for a copy
     // with them. Pin both, so the pointer can't go stale.

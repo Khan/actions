@@ -15,11 +15,12 @@ inputs:
         default: "false"
     config-file:
         # The default below can't be written out in full: the runner parses
-        # `${{` in a description as an expression when it loads the action,
-        # and `vars` isn't available there, so the action fails to load (as
-        # v4.0.0 did). Hence the expression without its braces, and a pointer
-        # to a copy that has them. utils/action-descriptions.test.ts fails if
-        # any description gets a `${{`.
+        # `${{` in an input's description as an expression when it loads the
+        # action, and `vars` isn't one of the contexts available there, so the
+        # action fails to load (as v4.0.0 did). Hence the expression without
+        # its braces, and a pointer to a copy that has them.
+        # utils/action-descriptions.test.ts bans `${{` in every description,
+        # whatever context it uses.
         description: >-
             Path, relative to the repo root, of a YAML file whose
             `allowed-runs-on` key lists the exact runs-on values workflows may

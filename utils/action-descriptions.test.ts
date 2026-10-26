@@ -3,11 +3,18 @@ import * as realFs from "node:fs";
 import path from "node:path";
 import {parse} from "yaml";
 
-// The runner parses `${{` in an action's descriptions as an expression when it
-// loads the action, and most contexts (`vars`, `secrets`, `inputs`, ...) aren't
-// available there, so one stray `${{` fails every job that uses the action at
-// "Set up job", before any step runs. fix-workflows v4.0.0 shipped that way. A
-// description has to name an expression some other way, e.g. by the text
+// The runner parses `${{` in some of an action's descriptions (an input's, at
+// least) as an expression when it loads the action, and only a few contexts
+// are available there. An expression that uses another one (`vars` and
+// `secrets`, for example) fails every job that uses the action at "Set up
+// job", before any step runs; fix-workflows v4.0.0 shipped that way with
+// `vars`.
+//
+// Which contexts each description field allows isn't documented (it's in the
+// runner's action_yaml.json) and differs by field, so rather than tell the
+// expressions that would load from the ones that wouldn't, this bans `${{` in
+// every description. A description is documentation, shown as raw text, so it
+// never needs a live expression: name one some other way, e.g. by the text
 // inside its braces. (`${{` is fine in `outputs.*.value` and in `runs:`.)
 
 type Described = {description?: unknown};
