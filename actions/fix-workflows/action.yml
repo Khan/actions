@@ -14,18 +14,26 @@ inputs:
         required: false
         default: "false"
     config-file:
+        # The default below can't be written out in full: the runner parses
+        # `${{` in a description as an expression when it loads the action,
+        # and `vars` isn't available there, so the action fails to load (as
+        # v4.0.0 did). Hence the expression without its braces, and a pointer
+        # to a copy that has them. utils/action-descriptions.test.ts fails if
+        # any description gets a `${{`.
         description: >-
             Path, relative to the repo root, of a YAML file whose
             `allowed-runs-on` key lists the exact runs-on values workflows may
             use, copied as they appear in the workflows. The first entry is
             what fix-runs-on writes. When empty, .github/fix-workflows.yml is
             used if it exists. With no file or no list, the only allowed value
-            (and what fix-runs-on writes) is the expression
-            `vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner'`
-            in the usual expression braces (not written out here, since
-            GitHub fails to load an action whose description contains them).
-            A path given here must exist. Ignored, and not read, when
-            fix-runs-on is off.
+            (and what fix-runs-on writes) is the ubuntu-latest form of the
+            ephemeral-runner toggle, the expression
+            `vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner'`.
+            To list it in the config, copy it with its expression braces from
+            the 4.0.0 entry in this action's CHANGELOG.md; without them it's a
+            plain string, and as the first entry fix-runs-on would rewrite
+            every runs-on to it. A path given here must exist. Ignored, and
+            not read, when fix-runs-on is off.
         required: false
         default: ""
     setup-action:
