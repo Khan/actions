@@ -20,8 +20,10 @@ inputs:
             use, copied as they appear in the workflows. The first entry is
             what fix-runs-on writes. When empty, .github/fix-workflows.yml is
             used if it exists. With no file or no list, the only allowed value
-            (and what fix-runs-on writes) is
-            `${{ vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner' }}`.
+            (and what fix-runs-on writes) is the expression
+            `vars.USE_GITHUB_RUNNERS == 'true' && 'ubuntu-latest' || 'ephemeral-runner'`
+            in the usual expression braces (not written out here, since
+            GitHub fails to load an action whose description contains them).
             A path given here must exist. Ignored, and not read, when
             fix-runs-on is off.
         required: false

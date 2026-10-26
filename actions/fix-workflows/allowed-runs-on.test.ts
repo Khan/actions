@@ -548,11 +548,29 @@ describe("action.yml", () => {
     const step = (name: string) =>
         action.runs.steps.find((s: {name: string}) => s.name === name);
 
+    // The runner parses `${{` in an action's descriptions as an expression
+    // when it loads the action, and `vars` (like most contexts) isn't
+    // available there, so v4.0.0 failed every job at "Set up job". So the
+    // description names each default by the expression inside its braces.
     it("documents DEFAULT_CONFIG_FILE and DEFAULT_ALLOWED_RUNS_ON", () => {
         const {description} = action.inputs["config-file"];
         expect(description).toContain(DEFAULT_CONFIG_FILE);
         for (const value of DEFAULT_ALLOWED_RUNS_ON) {
-            expect(description).toContain(value);
+            const inner = value
+                .replace(/^\$\{\{\s*/, "")
+                .replace(/\s*\}\}$/, "");
+            expect(inner).not.toBe(value);
+            expect(description).toContain(inner);
+        }
+    });
+
+    it("has no `${{` in any description, which would fail to load", () => {
+        const descriptions = [
+            action.description,
+            ...Object.values(action.inputs).map((i: any) => i.description),
+        ];
+        for (const description of descriptions) {
+            expect(description).not.toContain("${{");
         }
     });
 
