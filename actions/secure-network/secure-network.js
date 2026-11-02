@@ -512,7 +512,11 @@ async function main() {
     }
 
     // --- Step 3: Fetch GitHub Actions domains (while DNS still works) ---
-    console.log("Fetching GitHub Actions domains...");
+    console.log(
+        githubToken
+            ? "Fetching GitHub Actions domains (authenticated)..."
+            : "Fetching GitHub Actions domains (no token; may be rate limited)...",
+    );
     let githubMeta;
     try {
         githubMeta = await fetchWithRetry("https://api.github.com/meta", {
@@ -521,7 +525,7 @@ async function main() {
     } catch (err) {
         const fallbackPath = path.join(__dirname, "github-meta.json");
         console.log(
-            `WARN: Failed to fetch GitHub meta API (${err.message}). Falling back to ${fallbackPath}`,
+            `::warning::Failed to fetch GitHub meta API (${err.message}). Falling back to the bundled ${fallbackPath}, which can be out of date.`,
         );
         githubMeta = JSON.parse(fs.readFileSync(fallbackPath, "utf8"));
     }
