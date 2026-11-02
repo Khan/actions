@@ -12,6 +12,11 @@ on:
 permissions:
   contents: read
 
+# One run at a time, so two runs cannot both open a PR.
+concurrency:
+  group: secure-network-update-github-meta
+  cancel-in-progress: false
+
 jobs:
   update:
     name: Update github-meta.json
@@ -58,5 +63,5 @@ jobs:
               --base main \
               --head "$BRANCH" \
               --title "secure-network: update github-meta.json" \
-              --body "The weekly run of \`gen-github-meta.sh\` found changes in the GitHub Actions domains from \`https://api.github.com/meta\`. secure-network reads only this file, thus new domains are blocked until this PR merges."
+              --body "The weekly run of \`gen-github-meta.sh\` found changes in the GitHub Actions domains from \`https://api.github.com/meta\`. secure-network reads only this file, thus new domains are blocked until this PR merges and the next release moves the \`secure-network-v1\` tag."
           fi

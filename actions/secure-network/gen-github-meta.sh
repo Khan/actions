@@ -23,7 +23,8 @@ fi
 # Write to a temp file, so a failed call does not empty the real file.
 out="$(dirname "$0")/github-meta.json"
 trap 'rm -f "$out.tmp"' EXIT
-curl -sf ${auth[@]+"${auth[@]}"} https://api.github.com/meta | jq '{domains: {actions_inbound: .domains.actions_inbound}}' > "$out.tmp"
-# secure-network.js exits on an empty list, so do not publish one.
-jq -e '(.domains.actions_inbound.full_domains | length) > 0' "$out.tmp" > /dev/null
+# ${auth[@]+...}: an empty array fails under set -u on bash < 4.4.
+curl -sf ${auth[@]+"${auth[@]}"} https://api.github.com/meta | jq -f "$(dirname "$0")/github-meta.jq" > "$out.tmp"
+# Do not publish a file with an empty domain list.
+jq -e '.domains.actions_inbound | (.full_domains | length) > 0 and (.wildcard_domains | length) > 0' "$out.tmp" > /dev/null
 mv "$out.tmp" "$out"
