@@ -1,0 +1,62 @@
+# Keeps actions/secure-network/github-meta.json current. secure-network reads
+# only that file, so a stale copy blocks new GitHub Actions domains.
+
+name: Update GitHub meta
+
+on:
+  schedule:
+    # Weekly, Monday 07:17 UTC (off the top of the hour).
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    name: Update github-meta.json
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: secure-network/update-github-meta
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          # Bot token, so the PR it opens runs CI.
+          token: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
+
+      - name: Regenerate
+        run: bash actions/secure-network/gen-github-meta.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Open or update PR
+        env:
+          GH_TOKEN: ${{ secrets.KHAN_ACTIONS_BOT_TOKEN }}
+        run: |
+          if git diff --quiet -- actions/secure-network/github-meta.json; then
+            echo "github-meta.json is current."
+            exit 0
+          fi
+
+          cat > .changeset/secure-network-update-github-meta.md <<'MD'
+          ---
+          "secure-network": patch
+          ---
+
+          Update the bundled GitHub Actions domains (`github-meta.json`).
+          MD
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add actions/secure-network/github-meta.json .changeset/secure-network-update-github-meta.md
+          git commit -m "secure-network: update github-meta.json"
+          git push --force origin "$BRANCH"
+
+          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "secure-network: update github-meta.json" \
+              --body "The weekly run of \`gen-github-meta.sh\` found changes in the GitHub Actions domains from \`https://api.github.com/meta\`. secure-network reads only this file, thus new domains are blocked until this PR merges."
+          fi

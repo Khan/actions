@@ -4,7 +4,7 @@
 
 Make setup faster.
 
--   Add a `github-token` input (default: the job's token). The GitHub meta API call sends it, so the call is not rate limited from shared egress IPs.
--   Do not retry the meta API call on HTTP 4xx. Use the bundled `github-meta.json` at once. Make a maximum of 3 attempts on network errors and 5xx, with a 5 s timeout for each attempt.
--   Run the DNS prewarm and the final DNS check in parallel (16 lookups at a time).
+-   Read the GitHub Actions domains only from the bundled `github-meta.json`. Do not call the GitHub meta API. Unauthenticated calls from shared egress IPs got HTTP 403, and the retries took up to 18.5 s. A weekly workflow runs `gen-github-meta.sh` and opens a PR when the domains change.
+-   Remove the DNS cache prewarm.
+-   Run the final DNS check in parallel (16 lookups at a time).
 -   Start the script with `execFileSync` (no shell), so input values cannot inject commands.

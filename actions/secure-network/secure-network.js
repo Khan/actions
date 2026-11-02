@@ -286,59 +286,6 @@ async function mapWithConcurrency(items, limit, fn) {
     return results;
 }
 
-/**
- * Fetch JSON. Retries network errors and 5xx only; a 4xx (e.g. a 403
- * rate limit) fails at once, because a retry will not fix it soon.
- * @param {string} url
- * @param {{token?: string, maxAttempts?: number, retryDelayMs?: number, timeoutMs?: number, fetchImpl?: typeof fetch}} [options]
- * @returns {Promise<any>}
- */
-async function fetchWithRetry(
-    url,
-    {
-        token = "",
-        maxAttempts = 3,
-        retryDelayMs = 1000,
-        timeoutMs = 5000,
-        fetchImpl = fetch,
-    } = {},
-) {
-    const headers = {Accept: "application/vnd.github+json"};
-    if (token) {
-        headers.Authorization = `Bearer ${token}`;
-    }
-    for (let attempt = 1; ; attempt++) {
-        let retryable = true;
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeoutMs);
-            try {
-                const res = await fetchImpl(url, {
-                    headers,
-                    signal: controller.signal,
-                });
-                if (!res.ok) {
-                    retryable = res.status >= 500;
-                    throw new Error(`HTTP ${res.status}`);
-                }
-                return await res.json();
-            } finally {
-                clearTimeout(timer);
-            }
-        } catch (err) {
-            if (!retryable || attempt >= maxAttempts) {
-                throw err;
-            }
-            console.log(
-                `  Attempt ${attempt} failed (${err.message}); retrying in ${
-                    retryDelayMs / 1000
-                }s...`,
-            );
-            await new Promise((r) => setTimeout(r, retryDelayMs));
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // I/O helpers (not unit-tested)
 // ---------------------------------------------------------------------------
@@ -362,22 +309,6 @@ function digAsync(args) {
             resolve(err ? "" : stdout.trim());
         });
     });
-}
-
-/**
- * Read the GitHub token from stdin when main.js sends one.
- * stdin keeps it out of the process list.
- * @returns {string}
- */
-function readGithubToken() {
-    if (process.env.GITHUB_TOKEN_ON_STDIN !== "1") {
-        return "";
-    }
-    try {
-        return fs.readFileSync(0, "utf8").trim();
-    } catch (_) {
-        return "";
-    }
 }
 
 function blockDoH(table, action, ips) {
@@ -417,9 +348,6 @@ process.on("exit", (code) => {
 });
 
 async function main() {
-    // Read before any child process inherits stdin.
-    const githubToken = readGithubToken();
-
     console.log("Starting Unbound DNS firewall setup...");
 
     // --- Read inputs from env vars ---
@@ -511,27 +439,16 @@ async function main() {
         console.log(`Found search domain: ${searchDomains.join(" ")}`);
     }
 
-    // --- Step 3: Fetch GitHub Actions domains (while DNS still works) ---
-    console.log(
-        githubToken
-            ? "Fetching GitHub Actions domains (authenticated)..."
-            : "Fetching GitHub Actions domains (no token; may be rate limited)...",
+    // --- Step 3: Load GitHub Actions domains ---
+    // Bundled, not fetched: unauthenticated meta API calls from shared
+    // egress IPs get rate limited. gen-github-meta.sh refreshes the file.
+    console.log("Loading GitHub Actions domains...");
+    const githubMeta = JSON.parse(
+        fs.readFileSync(path.join(__dirname, "github-meta.json"), "utf8"),
     );
-    let githubMeta;
-    try {
-        githubMeta = await fetchWithRetry("https://api.github.com/meta", {
-            token: githubToken,
-        });
-    } catch (err) {
-        const fallbackPath = path.join(__dirname, "github-meta.json");
-        console.log(
-            `::warning::Failed to fetch GitHub meta API (${err.message}). Falling back to the bundled ${fallbackPath}, which can be out of date.`,
-        );
-        githubMeta = JSON.parse(fs.readFileSync(fallbackPath, "utf8"));
-    }
     const githubActionsDomainLines = parseGithubActionsDomains(githubMeta);
     if (githubActionsDomainLines.length === 0) {
-        console.error("ERROR: Failed to parse GitHub meta API response.");
+        console.error("ERROR: Failed to parse github-meta.json.");
         process.exit(1);
     }
 
@@ -599,42 +516,6 @@ async function main() {
     } catch (_) {
         /* pgrep not available — non-fatal */
     }
-
-    // Pre-warm the cache for all allowed domains before iptables goes up.
-    // With cache-min-ttl=3600 these entries will stay cached for the entire
-    // lifetime of the runner, surviving any transient DNS blips after lockdown.
-    console.log("Pre-warming DNS cache...");
-    const prewarmDomains = [
-        ...new Set([
-            ...allDomains.map(stripWildcard),
-            ...githubActionsDomainLines
-                .map((line) => line.match(/local-zone: "([^"]+)"/)?.[1])
-                .filter(Boolean),
-        ]),
-    ];
-    const prewarmResults = await mapWithConcurrency(
-        prewarmDomains,
-        DNS_CONCURRENCY,
-        (domain) =>
-            digAsync([
-                "@127.0.0.1",
-                domain,
-                "A",
-                "+short",
-                "+timeout=5",
-                "+retry=2",
-            ]),
-    );
-    prewarmDomains.forEach((domain, i) => {
-        const result = prewarmResults[i];
-        if (result) {
-            console.log(`  ✓ ${domain} (${result.replace(/\n/g, " ").trim()})`);
-        } else {
-            console.log(
-                `  ✗ ${domain} (no A record — may be CNAME-only, IPv6-only, or unreachable)`,
-            );
-        }
-    });
 
     console.log("Redirecting DNS to local Unbound resolver...");
     // On Ubuntu with systemd-resolved, /etc/resolv.conf is a symlink to
@@ -818,8 +699,6 @@ module.exports = {
     loadAllowlistFile,
     stripWildcard,
     mapWithConcurrency,
-    fetchWithRetry,
-    readGithubToken,
 };
 
 // Only run main when executed directly (not when require()'d by tests).
