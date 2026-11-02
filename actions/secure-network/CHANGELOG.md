@@ -1,5 +1,11 @@
 # secure-network
 
+## 1.1.1
+
+### Patch Changes
+
+-   1644c20: Update the bundled GitHub Actions domains (`github-meta.json`).
+
 ## 1.1.0
 
 ### Minor Changes
