@@ -684,6 +684,16 @@ describe("mapWithConcurrency", () => {
 
         // Assert
         expect(result).toEqual([]);
+    });
+
+    it("should not call fn for no items", async () => {
+        // Arrange
+        const fn = vi.fn();
+
+        // Act
+        await mapWithConcurrency([], 4, fn);
+
+        // Assert
         expect(fn).not.toHaveBeenCalled();
     });
 });
@@ -701,19 +711,28 @@ const jsonResponse = (status: number, body: unknown = {}) => ({
 describe("fetchWithRetry", () => {
     const opts = {retryDelayMs: 0};
 
-    it("should send the token as a Bearer Authorization header", async () => {
+    // Run to completion and ignore the result, to count calls.
+    const settle = (promise: Promise<unknown>) => promise.catch(() => {});
+
+    it("should return the parsed JSON body", async () => {
         // Arrange
         const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, {a: 1}));
 
         // Act
-        const result = await fetchWithRetry("https://x", {
-            ...opts,
-            token: "abc",
-            fetchImpl,
-        });
+        const result = await fetchWithRetry("https://x", {...opts, fetchImpl});
 
         // Assert
         expect(result).toEqual({a: 1});
+    });
+
+    it("should send the token as a Bearer Authorization header", async () => {
+        // Arrange
+        const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200));
+
+        // Act
+        await fetchWithRetry("https://x", {...opts, token: "abc", fetchImpl});
+
+        // Assert
         expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(
             "Bearer abc",
         );
@@ -733,7 +752,7 @@ describe("fetchWithRetry", () => {
     });
 
     it.each([401, 403, 404, 429])(
-        "should not retry on HTTP %s",
+        "should reject with the status on HTTP %s",
         async (status) => {
             // Arrange
             const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(status));
@@ -743,11 +762,24 @@ describe("fetchWithRetry", () => {
 
             // Assert
             await expect(promise).rejects.toThrow(`HTTP ${status}`);
+        },
+    );
+
+    it.each([401, 403, 404, 429])(
+        "should not retry on HTTP %s",
+        async (status) => {
+            // Arrange
+            const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(status));
+
+            // Act
+            await settle(fetchWithRetry("https://x", {...opts, fetchImpl}));
+
+            // Assert
             expect(fetchImpl).toHaveBeenCalledTimes(1);
         },
     );
 
-    it("should retry on 5xx and then succeed", async () => {
+    it("should return the body after a 5xx is retried", async () => {
         // Arrange
         vi.spyOn(console, "log").mockImplementation(() => {});
         const fetchImpl = vi
@@ -760,10 +792,9 @@ describe("fetchWithRetry", () => {
 
         // Assert
         expect(result).toEqual({ok: true});
-        expect(fetchImpl).toHaveBeenCalledTimes(2);
     });
 
-    it("should stop after the default maxAttempts of 3", async () => {
+    it("should reject with the last status after repeated 5xx", async () => {
         // Arrange
         vi.spyOn(console, "log").mockImplementation(() => {});
         const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(503));
@@ -773,7 +804,30 @@ describe("fetchWithRetry", () => {
 
         // Assert
         await expect(promise).rejects.toThrow("HTTP 503");
+    });
+
+    it("should stop after the default maxAttempts of 3", async () => {
+        // Arrange
+        vi.spyOn(console, "log").mockImplementation(() => {});
+        const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(503));
+
+        // Act
+        await settle(fetchWithRetry("https://x", {...opts, fetchImpl}));
+
+        // Assert
         expect(fetchImpl).toHaveBeenCalledTimes(3);
+    });
+
+    it("should reject with the error after repeated network errors", async () => {
+        // Arrange
+        vi.spyOn(console, "log").mockImplementation(() => {});
+        const fetchImpl = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
+
+        // Act
+        const promise = fetchWithRetry("https://x", {...opts, fetchImpl});
+
+        // Assert
+        await expect(promise).rejects.toThrow("ECONNRESET");
     });
 
     it("should retry network errors up to maxAttempts", async () => {
@@ -782,15 +836,12 @@ describe("fetchWithRetry", () => {
         const fetchImpl = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
 
         // Act
-        const promise = fetchWithRetry("https://x", {
-            ...opts,
-            maxAttempts: 3,
-            fetchImpl,
-        });
+        await settle(
+            fetchWithRetry("https://x", {...opts, maxAttempts: 2, fetchImpl}),
+        );
 
         // Assert
-        await expect(promise).rejects.toThrow("ECONNRESET");
-        expect(fetchImpl).toHaveBeenCalledTimes(3);
+        expect(fetchImpl).toHaveBeenCalledTimes(2);
     });
 });
 
@@ -807,31 +858,52 @@ describe("readGithubToken", () => {
         delete process.env.GITHUB_TOKEN_ON_STDIN;
     });
 
-    it("should return '' and not read stdin when no token was sent", () => {
+    it("should return '' when no token was sent", () => {
         // Arrange
-        const read = vi.spyOn(cjsFs, "readFileSync");
+        vi.spyOn(cjsFs, "readFileSync");
 
         // Act
         const result = readGithubToken();
 
         // Assert
         expect(result).toBe("");
+    });
+
+    it("should not read stdin when no token was sent", () => {
+        // Arrange
+        const read = vi.spyOn(cjsFs, "readFileSync");
+
+        // Act
+        readGithubToken();
+
+        // Assert
         expect(read).not.toHaveBeenCalled();
     });
 
-    it("should read and trim the token from stdin", () => {
+    it("should read the token from stdin", () => {
         // Arrange
         process.env.GITHUB_TOKEN_ON_STDIN = "1";
         const read = vi
             .spyOn(cjsFs, "readFileSync")
-            .mockReturnValue("ghs_abc\n" as never);
+            .mockReturnValue("ghs_abc" as never);
+
+        // Act
+        readGithubToken();
+
+        // Assert
+        expect(read).toHaveBeenCalledWith(0, "utf8");
+    });
+
+    it("should trim the token", () => {
+        // Arrange
+        process.env.GITHUB_TOKEN_ON_STDIN = "1";
+        vi.spyOn(cjsFs, "readFileSync").mockReturnValue("ghs_abc\n" as never);
 
         // Act
         const result = readGithubToken();
 
         // Assert
         expect(result).toBe("ghs_abc");
-        expect(read).toHaveBeenCalledWith(0, "utf8");
     });
 
     it("should return '' when stdin cannot be read", () => {
