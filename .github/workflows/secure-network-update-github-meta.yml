@@ -1,7 +1,7 @@
 # Keeps actions/secure-network/github-meta.json current. secure-network reads
 # only that file, so a stale copy blocks new GitHub Actions domains.
 
-name: Update GitHub meta
+name: Secure Network Update GitHub Meta
 
 on:
   schedule:

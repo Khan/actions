@@ -3,6 +3,7 @@ import {createRequire} from "module";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import {fileURLToPath} from "node:url";
 
 const require = createRequire(import.meta.url);
 
@@ -693,5 +694,44 @@ describe("mapWithConcurrency", () => {
 
         // Assert
         expect(fn).not.toHaveBeenCalled();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// bundled github-meta.json
+// ---------------------------------------------------------------------------
+
+describe("bundled github-meta.json", () => {
+    const loadBundled = () =>
+        parseGithubActionsDomains(
+            JSON.parse(
+                fs.readFileSync(
+                    path.join(
+                        path.dirname(fileURLToPath(import.meta.url)),
+                        "github-meta.json",
+                    ),
+                    "utf8",
+                ),
+            ),
+        );
+
+    it("should parse into a non-empty allowlist", () => {
+        // Arrange
+
+        // Act
+        const result = loadBundled();
+
+        // Assert
+        expect(result.length).toBeGreaterThan(0);
+    });
+
+    it("should include github.com", () => {
+        // Arrange
+
+        // Act
+        const result = loadBundled();
+
+        // Assert
+        expect(result).toContain('local-zone: "github.com" transparent');
     });
 });
