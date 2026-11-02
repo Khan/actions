@@ -14,15 +14,21 @@ const path = require("node:path");
 // GitHub Actions sets input names with hyphens as INPUT_CONF-FILES etc.
 const confFiles = process.env["INPUT_CONF-FILES"] || "";
 const extraDomains = process.env["INPUT_EXTRA-DOMAINS"] || "";
+const githubToken = process.env["INPUT_GITHUB-TOKEN"] || "";
 
 try {
+    // Token goes on stdin, not argv, so it is not in the process list.
     execSync(
         `sudo env ` +
             `"PATH=${process.env.PATH}" ` +
             `"CONF_FILES=${confFiles}" ` +
             `"EXTRA_DOMAINS=${extraDomains}" ` +
+            `"GITHUB_TOKEN_ON_STDIN=${githubToken ? "1" : ""}" ` +
             `node "${path.join(__dirname, "secure-network.js")}"`,
-        {stdio: "inherit"},
+        {
+            stdio: [githubToken ? "pipe" : "inherit", "inherit", "inherit"],
+            input: githubToken || undefined,
+        },
     );
 } catch (err) {
     process.exit(err.status ?? 1);

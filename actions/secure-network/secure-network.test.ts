@@ -1,4 +1,4 @@
-import {describe, it, expect} from "vitest";
+import {describe, it, expect, vi} from "vitest";
 import {createRequire} from "module";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -16,6 +16,8 @@ const {
     buildUnboundConf,
     loadAllowlistFile,
     stripWildcard,
+    mapWithConcurrency,
+    fetchWithRetry,
 } = require("./secure-network.js");
 
 // ---------------------------------------------------------------------------
@@ -628,5 +630,152 @@ describe("stripWildcard", () => {
 
         // Assert
         expect(result).toBe(expected);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// mapWithConcurrency
+// ---------------------------------------------------------------------------
+
+describe("mapWithConcurrency", () => {
+    it("should return results in input order", async () => {
+        // Arrange
+        const items = [30, 10, 20];
+
+        // Act
+        const result = await mapWithConcurrency(
+            items,
+            2,
+            async (ms: number) => {
+                await new Promise((r) => setTimeout(r, ms));
+                return ms * 2;
+            },
+        );
+
+        // Assert
+        expect(result).toEqual([60, 20, 40]);
+    });
+
+    it("should not run more than the limit at once", async () => {
+        // Arrange
+        let inFlight = 0;
+        let maxInFlight = 0;
+        const items = Array.from({length: 20}, (_, i) => i);
+
+        // Act
+        await mapWithConcurrency(items, 4, async () => {
+            inFlight++;
+            maxInFlight = Math.max(maxInFlight, inFlight);
+            await new Promise((r) => setTimeout(r, 1));
+            inFlight--;
+        });
+
+        // Assert
+        expect(maxInFlight).toBe(4);
+    });
+
+    it("should return an empty array for no items", async () => {
+        // Arrange
+        const fn = vi.fn();
+
+        // Act
+        const result = await mapWithConcurrency([], 4, fn);
+
+        // Assert
+        expect(result).toEqual([]);
+        expect(fn).not.toHaveBeenCalled();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// fetchWithRetry
+// ---------------------------------------------------------------------------
+
+const jsonResponse = (status: number, body: unknown = {}) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+});
+
+describe("fetchWithRetry", () => {
+    const opts = {retryDelayMs: 0};
+
+    it("should send the token as a Bearer Authorization header", async () => {
+        // Arrange
+        const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, {a: 1}));
+
+        // Act
+        const result = await fetchWithRetry("https://x", {
+            ...opts,
+            token: "abc",
+            fetchImpl,
+        });
+
+        // Assert
+        expect(result).toEqual({a: 1});
+        expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(
+            "Bearer abc",
+        );
+    });
+
+    it("should send no Authorization header without a token", async () => {
+        // Arrange
+        const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200));
+
+        // Act
+        await fetchWithRetry("https://x", {...opts, fetchImpl});
+
+        // Assert
+        expect(fetchImpl.mock.calls[0]?.[1].headers).not.toHaveProperty(
+            "Authorization",
+        );
+    });
+
+    it.each([401, 403, 404, 429])(
+        "should not retry on HTTP %s",
+        async (status) => {
+            // Arrange
+            const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(status));
+
+            // Act
+            const promise = fetchWithRetry("https://x", {...opts, fetchImpl});
+
+            // Assert
+            await expect(promise).rejects.toThrow(`HTTP ${status}`);
+            expect(fetchImpl).toHaveBeenCalledTimes(1);
+        },
+    );
+
+    it("should retry on 5xx and then succeed", async () => {
+        // Arrange
+        vi.spyOn(console, "log").mockImplementation(() => {});
+        const fetchImpl = vi
+            .fn()
+            .mockResolvedValueOnce(jsonResponse(502))
+            .mockResolvedValueOnce(jsonResponse(200, {ok: true}));
+
+        // Act
+        const result = await fetchWithRetry("https://x", {...opts, fetchImpl});
+
+        // Assert
+        expect(result).toEqual({ok: true});
+        expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it("should retry network errors up to maxAttempts", async () => {
+        // Arrange
+        vi.spyOn(console, "log").mockImplementation(() => {});
+        const fetchImpl = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
+
+        // Act
+        const promise = fetchWithRetry("https://x", {
+            ...opts,
+            maxAttempts: 3,
+            fetchImpl,
+        });
+
+        // Assert
+        await expect(promise).rejects.toThrow("ECONNRESET");
+        expect(fetchImpl).toHaveBeenCalledTimes(3);
     });
 });
