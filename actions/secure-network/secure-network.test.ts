@@ -1,8 +1,9 @@
-import {describe, it, expect} from "vitest";
+import {describe, it, expect, vi} from "vitest";
 import {createRequire} from "module";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import {fileURLToPath} from "node:url";
 
 const require = createRequire(import.meta.url);
 
@@ -16,6 +17,7 @@ const {
     buildUnboundConf,
     loadAllowlistFile,
     stripWildcard,
+    mapWithConcurrency,
 } = require("./secure-network.js");
 
 // ---------------------------------------------------------------------------
@@ -628,5 +630,108 @@ describe("stripWildcard", () => {
 
         // Assert
         expect(result).toBe(expected);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// mapWithConcurrency
+// ---------------------------------------------------------------------------
+
+describe("mapWithConcurrency", () => {
+    it("should return results in input order", async () => {
+        // Arrange
+        const items = [30, 10, 20];
+
+        // Act
+        const result = await mapWithConcurrency(
+            items,
+            2,
+            async (ms: number) => {
+                await new Promise((r) => setTimeout(r, ms));
+                return ms * 2;
+            },
+        );
+
+        // Assert
+        expect(result).toEqual([60, 20, 40]);
+    });
+
+    it("should not run more than the limit at once", async () => {
+        // Arrange
+        let inFlight = 0;
+        let maxInFlight = 0;
+        const items = Array.from({length: 20}, (_, i) => i);
+
+        // Act
+        await mapWithConcurrency(items, 4, async () => {
+            inFlight++;
+            maxInFlight = Math.max(maxInFlight, inFlight);
+            await new Promise((r) => setTimeout(r, 1));
+            inFlight--;
+        });
+
+        // Assert
+        expect(maxInFlight).toBe(4);
+    });
+
+    it("should return an empty array for no items", async () => {
+        // Arrange
+        const fn = vi.fn();
+
+        // Act
+        const result = await mapWithConcurrency([], 4, fn);
+
+        // Assert
+        expect(result).toEqual([]);
+    });
+
+    it("should not call fn for no items", async () => {
+        // Arrange
+        const fn = vi.fn();
+
+        // Act
+        await mapWithConcurrency([], 4, fn);
+
+        // Assert
+        expect(fn).not.toHaveBeenCalled();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// bundled github-meta.json
+// ---------------------------------------------------------------------------
+
+describe("bundled github-meta.json", () => {
+    const loadBundled = () =>
+        parseGithubActionsDomains(
+            JSON.parse(
+                fs.readFileSync(
+                    path.join(
+                        path.dirname(fileURLToPath(import.meta.url)),
+                        "github-meta.json",
+                    ),
+                    "utf8",
+                ),
+            ),
+        );
+
+    it("should parse into a non-empty allowlist", () => {
+        // Arrange
+
+        // Act
+        const result = loadBundled();
+
+        // Assert
+        expect(result.length).toBeGreaterThan(0);
+    });
+
+    it("should include github.com", () => {
+        // Arrange
+
+        // Act
+        const result = loadBundled();
+
+        // Assert
+        expect(result).toContain('local-zone: "github.com" transparent');
     });
 });

@@ -30,9 +30,13 @@
  */
 
 /* eslint-disable no-console */
-const {execSync} = require("node:child_process");
+const {execFile, execSync} = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+
+// Max parallel dig lookups. Enough to hide per-query latency; low enough
+// not to flood the upstream resolver.
+const DNS_CONCURRENCY = 16;
 
 // Cloudflare DNS IPs used both as unbound forward fallbacks and for DoH blocking.
 const CLOUDFLARE_DNS_IPS = ["1.1.1.1", "1.0.0.1"];
@@ -52,7 +56,7 @@ const DOH_PROVIDER_IPV6 = {
 };
 
 // ---------------------------------------------------------------------------
-// Pure helper functions (exported for unit testing)
+// Unit-tested helpers (exported for tests)
 // ---------------------------------------------------------------------------
 
 /**
@@ -258,6 +262,30 @@ function stripWildcard(domain) {
     return domain.startsWith("*.") ? domain.slice(2) : domain;
 }
 
+/**
+ * Map over items with at most `limit` calls of `fn` in flight.
+ * Results keep the input order.
+ * @template T, R
+ * @param {T[]} items
+ * @param {number} limit
+ * @param {(item: T) => Promise<R>} fn
+ * @returns {Promise<R[]>}
+ */
+async function mapWithConcurrency(items, limit, fn) {
+    const results = new Array(items.length);
+    let next = 0;
+    const worker = async () => {
+        while (next < items.length) {
+            const i = next++;
+            results[i] = await fn(items[i]);
+        }
+    };
+    await Promise.all(
+        Array.from({length: Math.min(limit, items.length)}, worker),
+    );
+    return results;
+}
+
 // ---------------------------------------------------------------------------
 // I/O helpers (not unit-tested)
 // ---------------------------------------------------------------------------
@@ -270,40 +298,22 @@ function runQuiet(cmd) {
     return execSync(cmd, {stdio: "pipe", encoding: "utf8"}).trim();
 }
 
+/**
+ * Run dig and return its trimmed stdout ("" on failure).
+ * @param {string[]} args
+ * @returns {Promise<string>}
+ */
+function digAsync(args) {
+    return new Promise((resolve) => {
+        execFile("dig", args, {encoding: "utf8"}, (err, stdout) => {
+            resolve(err ? "" : stdout.trim());
+        });
+    });
+}
+
 function blockDoH(table, action, ips) {
     for (const ip of ips) {
         run(`${table} -A OUTPUT -d ${ip} -p tcp --dport 443 -j ${action}`);
-    }
-}
-
-async function fetchWithRetry(
-    url,
-    {maxAttempts = 10, retryDelayMs = 2000, timeoutMs = 10000} = {},
-) {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeoutMs);
-            try {
-                const res = await fetch(url, {signal: controller.signal});
-                if (!res.ok) {
-                    throw new Error(`HTTP ${res.status}`);
-                }
-                return await res.json();
-            } finally {
-                clearTimeout(timer);
-            }
-        } catch (err) {
-            if (attempt === maxAttempts) {
-                throw err;
-            }
-            console.log(
-                `  Attempt ${attempt} failed (${err.message}); retrying in ${
-                    retryDelayMs / 1000
-                }s...`,
-            );
-            await new Promise((r) => setTimeout(r, retryDelayMs));
-        }
     }
 }
 
@@ -429,21 +439,16 @@ async function main() {
         console.log(`Found search domain: ${searchDomains.join(" ")}`);
     }
 
-    // --- Step 3: Fetch GitHub Actions domains (while DNS still works) ---
-    console.log("Fetching GitHub Actions domains...");
-    let githubMeta;
-    try {
-        githubMeta = await fetchWithRetry("https://api.github.com/meta");
-    } catch (_) {
-        const fallbackPath = path.join(__dirname, "github-meta.json");
-        console.log(
-            `WARN: Failed to fetch GitHub meta API after 10 attempts. Falling back to ${fallbackPath}`,
-        );
-        githubMeta = JSON.parse(fs.readFileSync(fallbackPath, "utf8"));
-    }
+    // --- Step 3: Load GitHub Actions domains ---
+    // Bundled, not fetched: unauthenticated meta API calls from shared
+    // egress IPs get rate limited. gen-github-meta.sh refreshes the file.
+    console.log("Loading GitHub Actions domains...");
+    const githubMeta = JSON.parse(
+        fs.readFileSync(path.join(__dirname, "github-meta.json"), "utf8"),
+    );
     const githubActionsDomainLines = parseGithubActionsDomains(githubMeta);
     if (githubActionsDomainLines.length === 0) {
-        console.error("ERROR: Failed to parse GitHub meta API response.");
+        console.error("ERROR: Failed to parse github-meta.json.");
         process.exit(1);
     }
 
@@ -510,40 +515,6 @@ async function main() {
         console.log(`Unbound PID: ${runQuiet("pgrep -n unbound")}`);
     } catch (_) {
         /* pgrep not available — non-fatal */
-    }
-
-    // Pre-warm the cache for all allowed domains before iptables goes up.
-    // With cache-min-ttl=3600 these entries will stay cached for the entire
-    // lifetime of the runner, surviving any transient DNS blips after lockdown.
-    console.log("Pre-warming DNS cache...");
-    const prewarm = (domain) => {
-        try {
-            const result = runQuiet(
-                `dig @127.0.0.1 "${domain}" A +short +timeout=5 +retry=2`,
-            );
-            if (result) {
-                console.log(
-                    `  ✓ ${domain} (${result.replace(/\n/g, " ").trim()})`,
-                );
-            } else {
-                console.log(
-                    `  ✗ ${domain} (no A record — may be CNAME-only, IPv6-only, or unreachable)`,
-                );
-            }
-        } catch (_) {
-            console.log(
-                `  ✗ ${domain} (no A record — may be CNAME-only, IPv6-only, or unreachable)`,
-            );
-        }
-    };
-    for (const domain of allDomains) {
-        prewarm(stripWildcard(domain));
-    }
-    for (const line of githubActionsDomainLines) {
-        const m = line.match(/local-zone: "([^"]+)"/);
-        if (m) {
-            prewarm(m[1]);
-        }
     }
 
     console.log("Redirecting DNS to local Unbound resolver...");
@@ -675,28 +646,29 @@ async function main() {
     console.log(
         "Final DNS verification (system resolver → Unbound → upstream)...",
     );
+    const verifyResults = await mapWithConcurrency(
+        allDomains,
+        DNS_CONCURRENCY,
+        (domain) =>
+            digAsync([
+                stripWildcard(domain),
+                "A",
+                "+short",
+                "+timeout=5",
+                "+retry=1",
+            ]),
+    );
     let verifyFailed = false;
-    for (const domain of allDomains) {
-        const bare = stripWildcard(domain);
-        try {
-            const result = runQuiet(
-                `dig "${bare}" A +short +timeout=5 +retry=1`,
-            );
-            if (result) {
-                console.log(`  ✓ ${domain}`);
-            } else {
-                console.log(
-                    `  ✗ ${domain} (FAILED — DNS broken for this domain after lockdown)`,
-                );
-                verifyFailed = true;
-            }
-        } catch (_) {
+    allDomains.forEach((domain, i) => {
+        if (verifyResults[i]) {
+            console.log(`  ✓ ${domain}`);
+        } else {
             console.log(
                 `  ✗ ${domain} (FAILED — DNS broken for this domain after lockdown)`,
             );
             verifyFailed = true;
         }
-    }
+    });
     if (verifyFailed) {
         console.error(
             "ERROR: Post-lockdown DNS verification failed. Unbound log:",
@@ -726,6 +698,7 @@ module.exports = {
     buildUnboundConf,
     loadAllowlistFile,
     stripWildcard,
+    mapWithConcurrency,
 };
 
 // Only run main when executed directly (not when require()'d by tests).
