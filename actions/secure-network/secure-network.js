@@ -34,7 +34,8 @@ const {execFile, execSync} = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
-// Max parallel dig lookups.
+// Max parallel dig lookups. Enough to hide per-query latency; low enough
+// not to flood the upstream resolver.
 const DNS_CONCURRENCY = 16;
 
 // Cloudflare DNS IPs used both as unbound forward fallbacks and for DoH blocking.
@@ -55,7 +56,7 @@ const DOH_PROVIDER_IPV6 = {
 };
 
 // ---------------------------------------------------------------------------
-// Pure helper functions (exported for unit testing)
+// Unit-tested helpers (exported for tests)
 // ---------------------------------------------------------------------------
 
 /**
@@ -416,6 +417,9 @@ process.on("exit", (code) => {
 });
 
 async function main() {
+    // Read before any child process inherits stdin.
+    const githubToken = readGithubToken();
+
     console.log("Starting Unbound DNS firewall setup...");
 
     // --- Read inputs from env vars ---
@@ -512,7 +516,7 @@ async function main() {
     let githubMeta;
     try {
         githubMeta = await fetchWithRetry("https://api.github.com/meta", {
-            token: readGithubToken(),
+            token: githubToken,
         });
     } catch (err) {
         const fallbackPath = path.join(__dirname, "github-meta.json");
@@ -811,6 +815,7 @@ module.exports = {
     stripWildcard,
     mapWithConcurrency,
     fetchWithRetry,
+    readGithubToken,
 };
 
 // Only run main when executed directly (not when require()'d by tests).

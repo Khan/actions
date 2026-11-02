@@ -1,4 +1,4 @@
-import {describe, it, expect, vi} from "vitest";
+import {afterEach, describe, it, expect, vi} from "vitest";
 import {createRequire} from "module";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -18,6 +18,7 @@ const {
     stripWildcard,
     mapWithConcurrency,
     fetchWithRetry,
+    readGithubToken,
 } = require("./secure-network.js");
 
 // ---------------------------------------------------------------------------
@@ -762,6 +763,19 @@ describe("fetchWithRetry", () => {
         expect(fetchImpl).toHaveBeenCalledTimes(2);
     });
 
+    it("should stop after the default maxAttempts of 3", async () => {
+        // Arrange
+        vi.spyOn(console, "log").mockImplementation(() => {});
+        const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(503));
+
+        // Act
+        const promise = fetchWithRetry("https://x", {...opts, fetchImpl});
+
+        // Assert
+        await expect(promise).rejects.toThrow("HTTP 503");
+        expect(fetchImpl).toHaveBeenCalledTimes(3);
+    });
+
     it("should retry network errors up to maxAttempts", async () => {
         // Arrange
         vi.spyOn(console, "log").mockImplementation(() => {});
@@ -777,5 +791,60 @@ describe("fetchWithRetry", () => {
         // Assert
         await expect(promise).rejects.toThrow("ECONNRESET");
         expect(fetchImpl).toHaveBeenCalledTimes(3);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// readGithubToken
+// ---------------------------------------------------------------------------
+
+describe("readGithubToken", () => {
+    // The CJS module object, so spies reach secure-network.js.
+    const cjsFs = require("node:fs");
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+        delete process.env.GITHUB_TOKEN_ON_STDIN;
+    });
+
+    it("should return '' and not read stdin when no token was sent", () => {
+        // Arrange
+        const read = vi.spyOn(cjsFs, "readFileSync");
+
+        // Act
+        const result = readGithubToken();
+
+        // Assert
+        expect(result).toBe("");
+        expect(read).not.toHaveBeenCalled();
+    });
+
+    it("should read and trim the token from stdin", () => {
+        // Arrange
+        process.env.GITHUB_TOKEN_ON_STDIN = "1";
+        const read = vi
+            .spyOn(cjsFs, "readFileSync")
+            .mockReturnValue("ghs_abc\n" as never);
+
+        // Act
+        const result = readGithubToken();
+
+        // Assert
+        expect(result).toBe("ghs_abc");
+        expect(read).toHaveBeenCalledWith(0, "utf8");
+    });
+
+    it("should return '' when stdin cannot be read", () => {
+        // Arrange
+        process.env.GITHUB_TOKEN_ON_STDIN = "1";
+        vi.spyOn(cjsFs, "readFileSync").mockImplementation(() => {
+            throw new Error("EAGAIN");
+        });
+
+        // Act
+        const result = readGithubToken();
+
+        // Assert
+        expect(result).toBe("");
     });
 });
