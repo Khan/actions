@@ -873,6 +873,7 @@ export const runSubmissionCli = (
         priorStamp,
         priorReviewsRaw: priorRaw,
         keptBlockingCount: rereview.keptBlockingCount,
+        unresolvedBlockingCount: rereview.unresolvedBlockingCount,
         suppressedBlocking,
         canary,
     });
