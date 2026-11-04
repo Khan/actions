@@ -4,7 +4,7 @@ inputs:
   node-version:
     description: 'Node version to use'
     required: false
-    default: '24.x'
+    default: '24.22.1'
   ssh-private-key:
     description: 'A private SSH key so that we can obtain private dependencies like our event schema package'
     required: false
