@@ -272,9 +272,10 @@ claiming a band.
   carries tier 2's own dollars and wall-clock beside it, because the dispatch
   precondition is satisfied by most multi-finding reviews: the steady state is a
   serial Sonnet call on nearly every run, and a merge count is a graduation
-  argument only next to what those merges cost. `rejected` counts cluster
-  MEMBERS the merge rules refused, so one bad
-  proposal naming three ids counts three (`unknown-id` there means the clusterer
+  argument only next to what those merges cost. `rejected` counts proposal-local
+  member refusals, not unique claims left unmerged or separately posted findings.
+  A `head-reserved` member may have merged under tier 1 or an earlier proposal.
+  One proposal naming three ids that all fail counts three (`unknown-id` there means the clusterer
   named claims that do not exist, which is a prompt or staging failure rather
   than a quiet zero). A dispatch that returned nothing usable is reported as
   `N clusterer failure(s)` rather than folded into the zero: the arm paid and
