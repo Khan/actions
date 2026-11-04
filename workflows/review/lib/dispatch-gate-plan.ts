@@ -67,6 +67,53 @@ export type SubmissionPlanViolationsInput = {
     commentCount: number;
 };
 
+/** Context kept on each side of the first differing character. */
+const SNIPPET_RADIUS = 40;
+
+/**
+ * Name the first differing entry of two sorted `path:line:normalizedBody`
+ * key lists, with a short snippet of each side around the first differing
+ * character. Counts alone cannot tell a sanitizer-fold gap from a splice
+ * (Khan/mobile#4164: "(3) do not match ... (3)" over a `<domain>`
+ * placeholder), so the report has to show where the two sides part.
+ * Snippets are in comparison form (lowercased, sanitizer-folded), which is
+ * the form that actually differed.
+ */
+export const describeFirstKeyDifference = (
+    planned: ReadonlyArray<string>,
+    queued: ReadonlyArray<string>,
+): string => {
+    const index = planned.findIndex((key, i) => key !== queued[i]);
+    const at = index === -1 ? planned.length : index;
+    const plan = planned[at];
+    const queue = queued[at];
+    let diff = 0;
+    while (
+        plan !== undefined &&
+        queue !== undefined &&
+        diff < plan.length &&
+        plan[diff] === queue[diff]
+    ) {
+        diff++;
+    }
+    const snippet = (key: string | undefined): string => {
+        if (key === undefined) {
+            return "(none)";
+        }
+        const start = Math.max(0, diff - SNIPPET_RADIUS);
+        const end = Math.min(key.length, diff + SNIPPET_RADIUS);
+        return JSON.stringify(
+            `${start > 0 ? "…" : ""}${key.slice(start, end)}${
+                end < key.length ? "…" : ""
+            }`,
+        );
+    };
+    const location = (plan ?? queue ?? "").split(":").slice(0, 2).join(":");
+    return `first difference at ${location}: plan ${snippet(
+        plan,
+    )} vs queued ${snippet(queue)}`;
+};
+
 /** Evaluate rule 7; returns [] when no plan is staged or nothing deviates. */
 export const submissionPlanViolations = (
     input: SubmissionPlanViolationsInput,
@@ -313,7 +360,11 @@ export const submissionPlanViolations = (
                 violations.push({
                     code: "submission-plan-mismatch",
                     dimension: "inline comments",
-                    detail: `queued inline comments (${queued.length}) do not match the staged submission plan (${planned.length})`,
+                    detail: `queued inline comments (${
+                        queued.length
+                    }) do not match the staged submission plan (${
+                        planned.length
+                    }); ${describeFirstKeyDifference(planned, queued)}`,
                 });
             }
         }

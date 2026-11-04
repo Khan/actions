@@ -79,6 +79,17 @@ describe("normalizeBody XML tag conversion", () => {
         expect(normalizeBody(plan)).toBe(normalizeBody(queued));
         expect(normalizeBody(plan)).toContain("<url:example.com>");
     });
+
+    it("folds a quoted placeholder in prose (Khan/mobile#4164 shape)", () => {
+        // Run 40552518034 on review-v1.12.0, which predates this fold: the
+        // staged comment quoted a UI label with a `<domain>` placeholder,
+        // the sanitizer queued `(domain)`, and rule 7 withheld the review.
+        const plan =
+            '**thought (non-blocking):** "See all <domain>" navigation is coupled';
+        const queued =
+            '**thought (non-blocking):** "See all (domain)" navigation is coupled';
+        expect(normalizeBody(plan)).toBe(normalizeBody(queued));
+    });
 });
 
 describe("normalizeBody URL folds (run 31616001094 incident shapes)", () => {
