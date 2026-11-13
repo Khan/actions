@@ -1,0 +1,47 @@
+{
+    "id": "webapp-41989-district-query-support",
+    "tags": [
+        "golden",
+        "claim-fidelity"
+    ],
+    "category": "golden",
+    "description": "The new country-wide District read materializes ineligible entities before filtering, with no page bound.",
+    "changedFiles": [
+        {
+            "path": "services/districts/emails/send_monthly_admin_email.go",
+            "status": "modified"
+        }
+    ],
+    "findings": [
+        {
+            "source": "correctness",
+            "finding": {
+                "schema_version": 2,
+                "id": "comment-3926287619",
+                "lens": "correctness",
+                "anchor": {
+                    "type": "line",
+                    "path": "services/districts/emails/send_monthly_admin_email.go",
+                    "line": 1857,
+                    "side": "RIGHT"
+                },
+                "severity": "advisory",
+                "confidence": 0.7,
+                "evidence_trace": [
+                    "https://github.com/Khan/webapp/blob/ec472f1619848fa78e8383b64ebb0d73a67a3756/services/districts/emails/send_monthly_admin_email.go#L1857"
+                ],
+                "failure_scenario": "The new country-wide District read materializes ineligible entities before filtering, with no page bound.",
+                "producing_hunt": "historical-comment-replay",
+                "model_authored_prose": "This new `crud.GetAll[models.District]` has no `.Limit()`, so it materializes every district in the country including the ineligible ones it then discards in memory \u2014 push the eligibility predicates into the query, or page it. Introduced by this change. Before this diff the district-side read was `crud.GetMulti[models.District]` over keys derived from the admin UDIs that had already been found (removed at old line 1753), so it was bounded by the admin-UDI set; now it is bounded only by how many District entities exist with that country_code, and the eligibility filter runs afterwards in memory at lines 1862-1874. District is a wide model (61 `datastore:` properties in services/districts/models/district.go) and the whole entity is loaded, not a projection. The predicates being filtered in memory are stored, indexable properties \u2014 `District.EligibleForKADEmails()` at services/districts/models/district.go:451 is just `SendKADEmails() && m.RosterSyncingEnabled` over `dont_send_kad_emails`/`roster_syncing_enabled`, and `IsTest` is `is_test` \u2014 so adding them as equality filters on the query (and the matching index.yaml entry), or paging with `.Limit()` plus a cursor and handling one page per invocation, would bound the read. I traced both callers (monthly_admin_email_batch.go:444 and kad_email_subscriptions.go:529) and neither is in a transaction and neither bounds the result before this point, so nothing upstream or downstream caps it.",
+                "summary": "This new `crud.GetAll[models.District]` has no `.Limit()`, so it materializes every district in the country including the ineligible ones it then discards in memory \u2014 push the eligibility predicates into the query, or page it."
+            }
+        }
+    ],
+    "expected": {
+        "verdict": "APPROVE",
+        "mustCatch": [
+            "comment-3926287619"
+        ],
+        "postedCommentCount": 1
+    }
+}
