@@ -1,0 +1,40 @@
+name: "Harden Checkout"
+description: >-
+    Make a stalled git transfer abort, so that the retries built into
+    actions/checkout get a chance to run instead of the step waiting out its
+    timeout. Use it as a job's first step, ahead of checkout. It sets git's
+    low-speed limits for every later step in the job, and it never fails the
+    job.
+
+inputs:
+    low-speed-limit:
+        description: >-
+            Bytes per second below which a git HTTP transfer counts as stalled.
+        required: false
+        default: "1000"
+    low-speed-time:
+        description: >-
+            Seconds a git HTTP transfer may stay below the low-speed limit
+            before git aborts it.
+        required: false
+        default: "20"
+
+runs:
+    using: "composite"
+    steps:
+        - name: Set git low-speed limits
+          shell: bash
+          env:
+              LOW_SPEED_LIMIT: ${{ inputs.low-speed-limit }}
+              LOW_SPEED_TIME: ${{ inputs.low-speed-time }}
+          run: |
+              # A bad input is skipped with a warning rather than failing the job.
+              if [[ "$LOW_SPEED_LIMIT" =~ ^[1-9][0-9]*$ && "$LOW_SPEED_TIME" =~ ^[1-9][0-9]*$ ]]; then
+                  {
+                      echo "GIT_HTTP_LOW_SPEED_LIMIT=$LOW_SPEED_LIMIT"
+                      echo "GIT_HTTP_LOW_SPEED_TIME=$LOW_SPEED_TIME"
+                  } >> "$GITHUB_ENV"
+                  echo "Git will abort an HTTP transfer that stays below $LOW_SPEED_LIMIT bytes per second for $LOW_SPEED_TIME seconds"
+              else
+                  echo "::warning::Ignoring the git low-speed limits, which must both be positive whole numbers"
+              fi
