@@ -14,9 +14,13 @@ type ActionYml = {
 };
 
 // The real script, as published, so these tests can't drift from the action.
-const script = (
+const firstStep = (
     parse(readFileSync(path.join(__dirname, "action.yml"), "utf8")) as ActionYml
-).runs.steps[0].run;
+).runs.steps[0];
+if (!firstStep) {
+    throw new Error("harden-checkout has no steps to test");
+}
+const script = firstStep.run;
 
 const hasGit = spawnSync("git", ["--version"]).status === 0;
 
