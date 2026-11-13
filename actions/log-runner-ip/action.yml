@@ -1,0 +1,21 @@
+name: "Log Runner IP"
+description: >-
+    Log the runner's public IP address, to help debug problems such as a blocked
+    IP address. It needs no checkout, so it can be a job's first step, and it
+    never fails the job.
+
+runs:
+    using: "composite"
+    steps:
+        - name: Log runner IP address
+          shell: bash
+          run: |
+              # Best-effort: a failed or missing lookup must never fail the job.
+              ip=$(curl --silent --fail --max-time 5 https://api.ipify.org || true)
+              # Only trust something that looks like an IP address, so a bad
+              # response can't inject workflow commands into the log.
+              if [[ "$ip" =~ ^[0-9a-fA-F:.]+$ ]]; then
+                  echo "Runner public IP: $ip"
+              else
+                  echo "Could not determine the runner's public IP address"
+              fi
