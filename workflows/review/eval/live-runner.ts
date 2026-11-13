@@ -68,6 +68,7 @@ import {
     DEFAULT_TRANSCRIPTS_DIR,
     writeTranscript,
     type TranscriptMessage,
+    type TranscriptOutcome,
 } from "./transcripts";
 
 /** Read-only investigation tools; see the module doc for the rationale. */
@@ -167,6 +168,7 @@ const runOnce = async (
         return deny(readScopeReason(request.readRoot, target, request.cwd));
     };
     const messages: TranscriptMessage[] = [];
+    const outcome: TranscriptOutcome = {status: "incomplete", wallMs: 0};
     const label = transcriptLabel(request);
     const attemptKey = [...label, request.name].join("/");
     const attempt = (attempts.get(attemptKey) ?? 0) + 1;
@@ -203,13 +205,26 @@ const runOnce = async (
             if (message.type === "assistant" || message.type === "user") {
                 const inner = (
                     message as unknown as {
-                        message?: {role?: string; content?: unknown};
+                        message?: {
+                            role?: string;
+                            content?: unknown;
+                            id?: string;
+                            model?: string;
+                            usage?: Record<string, unknown>;
+                        };
                     }
                 ).message;
                 if (inner !== undefined) {
                     messages.push({
                         role: inner.role ?? message.type,
                         content: inner.content,
+                        ...(inner.id === undefined ? {} : {id: inner.id}),
+                        ...(inner.model === undefined
+                            ? {}
+                            : {model: inner.model}),
+                        ...(inner.usage === undefined
+                            ? {}
+                            : {usage: inner.usage}),
                     });
                 }
             }
@@ -232,6 +247,7 @@ const runOnce = async (
                 // from a dropped one.
                 if (typeof inner?.stop_reason === "string") {
                     stopReason = inner.stop_reason;
+                    outcome.stopReason = stopReason;
                 }
                 // Token counts on the last assistant message: the
                 // discriminator between an overloaded provider and a prompt
@@ -263,12 +279,29 @@ const runOnce = async (
                 result?: string;
                 total_cost_usd?: number;
                 num_turns?: number;
+                errors?: string[];
             };
+            // Capture result totals before rejecting an unsuccessful dispatch.
+            // Message usage is retained separately, never added to these totals.
+            outcome.resultSubtype = result.subtype;
+            if (typeof result.total_cost_usd === "number") {
+                outcome.usd = result.total_cost_usd;
+            }
+            if (typeof result.num_turns === "number") {
+                outcome.turns = result.num_turns;
+            }
+            outcome.usage = usageOfResultMessage(
+                message as unknown as Record<string, unknown>,
+            );
+            if (result.errors !== undefined && result.errors.length > 0) {
+                outcome.errorMessage = result.errors.join("\n").slice(0, 500);
+            }
             if (result.subtype !== "success") {
                 throw new Error(
                     `sub-agent run ended without success: ${result.subtype}`,
                 );
             }
+            outcome.status = "success";
             output = result.result ?? "";
             usd = result.total_cost_usd ?? 0;
             turns = result.num_turns ?? 0;
@@ -285,6 +318,7 @@ const runOnce = async (
             ).error;
             if (err !== undefined) {
                 errorMessage = JSON.stringify(err).slice(0, 500);
+                outcome.errorMessage = errorMessage;
             }
         }
         return {
@@ -303,6 +337,10 @@ const runOnce = async (
             wallMs: Date.now() - started,
         };
     } catch (error) {
+        outcome.status = abort.signal.aborted ? "timeout" : "error";
+        outcome.errorMessage ??= (
+            error instanceof Error ? error.message : String(error)
+        ).slice(0, 500);
         // Carry the counters out with the failure (see LiveAgentError).
         if (error instanceof LiveAgentError) {
             throw error;
@@ -314,6 +352,12 @@ const runOnce = async (
         );
     } finally {
         clearTimeout(timer);
+        outcome.wallMs = Date.now() - started;
+        // An SDK stream can close on abort without throwing.
+        if (abort.signal.aborted) {
+            outcome.status = "timeout";
+            outcome.errorMessage ??= String(abort.signal.reason).slice(0, 500);
+        }
         // Written in finally so a timed-out or failed attempt leaves its
         // transcript too; those are the ones most worth reading.
         if (transcriptsDir !== false) {
@@ -325,6 +369,7 @@ const runOnce = async (
                     deniedReads,
                     deniedTools,
                     messages,
+                    outcome,
                 });
             } catch (error) {
                 console.error(

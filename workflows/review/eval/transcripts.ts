@@ -22,6 +22,8 @@ import {mkdirSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 
+import type {ModelTokens} from "../lib/pricing";
+
 /** Per-block character cap for tool results and assistant text. */
 export const TRIM_CHARS = 2_000;
 
@@ -38,6 +40,23 @@ type Block = Record<string, unknown>;
 export type TranscriptMessage = {
     role: string;
     content: unknown;
+    id?: string;
+    model?: string;
+    /** Raw SDK message usage, not summed across repeated message snapshots. */
+    usage?: Record<string, unknown>;
+};
+
+/** Dispatch metadata, present even when the SDK never emits a result. */
+export type TranscriptOutcome = {
+    status: "success" | "error" | "timeout" | "incomplete";
+    wallMs: number;
+    resultSubtype?: string;
+    stopReason?: string;
+    errorMessage?: string;
+    /** SDK result totals only. Missing means unavailable, not zero. */
+    usd?: number;
+    turns?: number;
+    usage?: ModelTokens[];
 };
 
 export type Transcript = {
@@ -52,6 +71,7 @@ export type Transcript = {
     /** Non-read tools the hook denied (the `tools` restriction's backstop). */
     deniedTools: number;
     messages: TranscriptMessage[];
+    outcome?: TranscriptOutcome;
 };
 
 const trimText = (text: string): string =>
@@ -156,6 +176,9 @@ export const writeTranscript = (
         deniedReads: transcript.deniedReads,
         deniedTools: transcript.deniedTools,
         messages,
+        ...(transcript.outcome === undefined
+            ? {}
+            : {outcome: transcript.outcome}),
     };
     writeFileSync(file, JSON.stringify(body, null, 2));
     return file;
