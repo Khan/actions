@@ -115,6 +115,9 @@ jobs:
           list: ${{ steps.nonexistant.outputs.something }}
           run: node -e 'console.log(process.argv); process.exit(1)' {}
 
+      # Test log-runner-ip
+      - uses: ./actions/log-runner-ip
+
       - uses: ./actions/check-for-changeset
         with:
           exclude: .github/,utils,.eslintrc.js,.prettierrc.js,.gitattributes
