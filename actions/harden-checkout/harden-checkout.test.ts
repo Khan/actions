@@ -10,13 +10,15 @@ import {parse} from "yaml";
 const execFileAsync = promisify(execFile);
 
 type ActionYml = {
-    runs: {steps: Array<{run: string}>};
+    inputs: Record<string, {default?: string}>;
+    runs: {steps: Array<{run: string; env?: Record<string, string>}>};
 };
 
-// The real script, as published, so these tests can't drift from the action.
-const firstStep = (
-    parse(readFileSync(path.join(__dirname, "action.yml"), "utf8")) as ActionYml
-).runs.steps[0];
+// The real action, as published, so these tests can't drift from it.
+const action = parse(
+    readFileSync(path.join(__dirname, "action.yml"), "utf8"),
+) as ActionYml;
+const firstStep = action.runs.steps[0];
 if (!firstStep) {
     throw new Error("harden-checkout has no steps to test");
 }
@@ -38,17 +40,42 @@ describe("harden-checkout", () => {
         rmSync(dir, {recursive: true, force: true});
     });
 
-    const run = (limit: string, time: string) =>
+    const runWithEnv = (env: Record<string, string | undefined>) =>
         spawnSync("bash", ["--noprofile", "--norc", "-e", "-o", "pipefail"], {
             input: script,
             encoding: "utf8",
-            env: {
-                PATH: process.env.PATH,
-                GITHUB_ENV: githubEnv,
-                LOW_SPEED_LIMIT: limit,
-                LOW_SPEED_TIME: time,
-            },
+            env: {PATH: process.env.PATH, GITHUB_ENV: githubEnv, ...env},
         });
+
+    const run = (limit: string, time: string) =>
+        runWithEnv({LOW_SPEED_LIMIT: limit, LOW_SPEED_TIME: time});
+
+    it("wires each declared input, at its default, into the script", () => {
+        // Arrange
+        // What the runner does between the action's inputs and the step's
+        // environment, which the other cases skip by setting it directly.
+        const defaultByExpression = Object.fromEntries(
+            Object.entries(action.inputs).map(([name, input]) => [
+                `\${{ inputs.${name} }}`,
+                input.default,
+            ]),
+        );
+        const env = Object.fromEntries(
+            Object.entries(firstStep.env ?? {}).map(([name, expression]) => [
+                name,
+                defaultByExpression[expression.trim()],
+            ]),
+        );
+
+        // Act
+        const result = runWithEnv(env);
+
+        // Assert
+        expect(readFileSync(githubEnv, "utf8")).toBe(
+            "GIT_HTTP_LOW_SPEED_LIMIT=1000\nGIT_HTTP_LOW_SPEED_TIME=20\n",
+        );
+        expect(result.status).toBe(0);
+    });
 
     it("exports both low-speed settings for later steps", () => {
         // Arrange

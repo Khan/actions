@@ -11,12 +11,21 @@ inputs:
         description: >-
             Bytes per second below which a git HTTP transfer counts as stalled.
         required: false
+        # Low on purpose: this is not a throughput floor. It only trips on a
+        # near-total stall, so a slow but moving transfer is left alone.
         default: "1000"
     low-speed-time:
         description: >-
             Seconds a git HTTP transfer may stay below the low-speed limit
             before git aborts it.
         required: false
+        # Sized against actions/checkout's retry budget: it retries a fetch 3
+        # times, 10 to 20 seconds apart, so 20 seconds here means a hung
+        # checkout fails in roughly 80 to 100 seconds and the retries finish
+        # well inside a 5 minute step timeout. Raising this much pushes the
+        # last attempt past that timeout. Time the server spends preparing a
+        # response, with nothing sent, also counts as a stall, so raise it if
+        # healthy fetches are being aborted.
         default: "20"
 
 runs:

@@ -107,6 +107,8 @@ importers:
 
   actions/get-changed-files: {}
 
+  actions/harden-checkout: {}
+
   actions/json-args: {}
 
   actions/secure-network: {}
