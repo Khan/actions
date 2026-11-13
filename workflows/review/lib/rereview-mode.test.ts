@@ -19,7 +19,7 @@ import {
 // countRereviewStampBlocks, stampHunksChain) lives in
 // rereview-stamp-fold.test.ts, split out by the max-lines budget.
 import type {HunkSignature, ReReviewStamp} from "./rereview-mode";
-import {normalizeBody} from "./sanitizer-normalize";
+import {loadRunnerSanitizer} from "./sanitizer-runtime";
 
 /* -------------------------------------------------------------------------- */
 /* Diff fixtures                                                              */
@@ -231,21 +231,16 @@ describe("stamp render/parse", () => {
     });
 
     it("survives the sanitizer's structural transforms (comment removal, tag conversion)", () => {
-        // normalizeBody mirrors the sanitizer's transforms, standing in
-        // here for the posting trip (it also case-folds, which the real
-        // sanitizer does not; the gate's own comparison additionally folds
-        // the stamp out via stripRereviewStamp). The assertion is
-        // whole-payload survival through the structural transforms, not a
-        // re-parse: a transform that redacted or rewrote the base64 field
-        // would still leave `hunks=` behind, so the marker alone pins
-        // nothing. The legacy-form test below shows the contrast: the same
-        // fold erases an HTML-comment stamp entirely.
-        const rendered = renderRereviewStamp(stampOf());
-        const payload = rendered.split("\n")[1].replace(/<\/?sub>/g, "");
-        const folded = normalizeBody(
-            `Approved — no blocking issues found.\n\n${rendered}`,
+        const stamp = stampOf();
+        const rendered = renderRereviewStamp(stamp);
+        // Use the real posting transform, not the gate's comparison folds.
+        const sanitized = loadRunnerSanitizer().sanitizeContentCore(
+            `Approved. <!-- removed --> <repo>\n\n${rendered}`,
         );
-        expect(folded).toContain(payload.toLowerCase());
+        expect(sanitized).not.toContain("<!-- removed -->");
+        expect(sanitized).toContain("(repo)");
+        expect(sanitized).toContain(rendered);
+        expect(parseRereviewStamp(sanitized)).toEqual(stamp);
     });
 
     it("encodes the fingerprint as base64url (no `=` padding, no `+` or `/`)", () => {
@@ -271,7 +266,9 @@ describe("stamp render/parse", () => {
         expect(parseRereviewStamp(legacy)?.anchorHunks).toEqual(signature);
         // And the failure this task fixed: sanitize the legacy form and the
         // fingerprint is gone.
-        expect(parseRereviewStamp(normalizeBody(legacy))).toBeNull();
+        const sanitized = loadRunnerSanitizer().sanitizeContentCore(legacy);
+        expect(sanitized).toBe("");
+        expect(parseRereviewStamp(sanitized)).toBeNull();
     });
 
     it("takes the last stamp when a body carries more than one", () => {
