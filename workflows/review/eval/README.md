@@ -209,6 +209,14 @@ scale and messiness. Grow recall discrimination from those sources only, and
 calibrate every new case with an identical-arm `--force-arms` run before
 claiming a band.
 
+### Useful findings with incorrect details
+
+The recorded [claim-fidelity cases](./claim-fidelity.md) separate the main
+defect, proposed fix, supporting assertions, and visible consequence. They
+retain useful findings while checking errors inside their prose or sketches.
+Their hand-authored correction controls test production/eval parity, not model
+quality. The report and commit-pinned source evidence are linked in that guide.
+
 ## Reading a report
 
 - **Load-bearing:** must-catch recall against labeled specs, verdict
