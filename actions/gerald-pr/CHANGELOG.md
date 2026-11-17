@@ -1,5 +1,11 @@
 # gerald-pr
 
+## 6.1.2
+
+### Patch Changes
+
+-   e27fbbc: Check out the base and head branches by fully-qualified ref, so actions/checkout fetches only that branch instead of every branch and tag sharing its name as a prefix
+
 ## 6.1.1
 
 ### Patch Changes
