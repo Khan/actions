@@ -97,11 +97,10 @@ export type RunCandidate = {
 /** The review the runner would submit — data only; nothing is posted. */
 export type PlannedReview = {
     /**
-     * The GitHub review event, or `null` for HOLD_FOR_HUMAN (not a GitHub
-     * event: review.md only allows [APPROVE, REQUEST_CHANGES], so a hold is
-     * surfaced by pulling in a human rather than auto-submitting).
+     * The review event to submit, or `null` for HOLD_FOR_HUMAN.
+     * A hold isn't a review event, so it calls for a human instead of submitting.
      */
-    event: "APPROVE" | "REQUEST_CHANGES" | null;
+    event: Exclude<VerdictEvent, "HOLD_FOR_HUMAN"> | null;
     /** The single-line review body (plus any skipped-dimension notes). */
     body: string;
     /** The inline/top-level comments that would be posted. */
