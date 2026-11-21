@@ -1,0 +1,1230 @@
+[
+  {
+    "pr": 41975,
+    "run": 33764285323,
+    "claims": [
+      {
+        "id": "correctness-reviewer-3",
+        "source": "correctness-reviewer",
+        "path": "services/content/getters/course_test.go",
+        "line": 245,
+        "label": "suggestion (non-blocking)",
+        "importance": "medium",
+        "subject": "No test covers the new dedup path (duplicates + `includeDuplicates=false`), which is the default production path",
+        "discussion": "No test covers the new dedup path (duplicates + `includeDuplicates=false`), which is the default production path. The added getter tests cover three of the four combinations but not the one the new code actually changes: `_MasteryMechDupes` passes `includeDuplicates: true` (no dedup), and `_NoMMExlcudeDupes` / `_MasteryMechNoDupes` use fixtures with no repeated IDs, so the `else if !exerciseIDHistory[ex.ID]` branch is never exercised with an actual duplicate. The resolver tests have the same gap: `TestGetMasterableExercises_ExcludeCovered` uses a duplicate-free fixture, and only `..._ExcludeCoveredIncludeDuplicates` has repeats.\n\nThat is the path `masterableExercises(excludeCovered: true)` takes by default (`includeDuplicates` unset \u2192 `false`) and the path `masterableExercisesWithoutCovered` now takes for every request, and published data does contain duplicates (see `_exercisesWithoutCovered` in `services/content-editing/publish/models/shared/mastery_enabled.go:262`). A case with a fixture like `{x01, x02, x02}` and `includeDuplicates=false` asserting exactly `[x01, x02]` would pin the dedup behavior and would have surfaced the empty-slot allocation issue flagged separately on `course.go:197`.",
+        "failure_scenario": "No test covers the new dedup path (duplicates + `includeDuplicates=false`), which is the default production path",
+        "confidence": 0.7
+      },
+      {
+        "id": "test-adequacy-1",
+        "source": "test-adequacy",
+        "path": "services/content/getters/course.go",
+        "line": 203,
+        "label": "todo (blocking)",
+        "subject": "The new deduplication branch is never exercised with an actual duplicate \u2014 please add a `includeDuplicates=false` + duplicate-IDs test for `GetMasterableExercisesWithoutCoveredForCourse`.",
+        "discussion": "The new deduplication branch is never exercised with an actual duplicate \u2014 please add a `includeDuplicates=false` + duplicate-IDs test for `GetMasterableExercisesWithoutCoveredForCourse`. `GetMasterableExercisesWithoutCoveredForCourse` (course.go:197-207) now allocates `exerciseIDs` with `make([]string, len(...))` and assigns by index `i`, so a skipped duplicate leaves `\"\"` at that index rather than being omitted. The result only comes out right because `GetExercisesByIDs` (getters/exercise.go:81-87) maps the empty-ID key to not-found \u2192 `nil`, and both downstream paths drop nils (`course.go:214-223` and `_filterExercisesByMasteryMechanic`, course.go:753-756). That is an implicit dependency worth pinning with a test.\n\nGrepping the two touched test files for calls into this getter: `course_test.go:187`, `:209`, `:232-238` all pass `includeDuplicates=false` but with duplicate-free input, and `:262-268` passes `includeDuplicates=true`, so the `else if` branch at line 203 never actually skips an element. Same on the resolver side \u2014 `TestGetMasterableExercises_ExcludeCovered` (resolvers/course_test.go:758) has no duplicates, and `_MasteryMechanicExcludeCovered` / `_ExcludeCoveredIncludeDuplicates` both pass `includeDuplicates: true`. The mirror function `GetMasterableExercisesForCourse` uses `append` on a zero-length slice (course.go:159-171), so it has no such empty slot; the divergence between the two is exactly what a test here would lock down.",
+        "failure_scenario": "With `includeDuplicates=false` and a duplicate ID in `course.MasterableExercisesWithoutCovered`, the new `else if !exerciseIDHistory[ex.ID]` branch leaves an empty-string slot in the fixed-length `exerciseIDs` slice; no test exercises that combination, so a regression in the dedup branch (wrong entry dropped, or the empty-ID snapshot lookup starting to error or resolve) would ship green.",
+        "suggestion": "func (suite *courseSuite) TestGetMasterableExercisesWithoutCoveredForCourse_ExcludeDupes() {\n\tctx := suite.KAContext()\n\tctx = suite._setupMasterableExercisesWithoutCovered(\n\t\tctx,\n\t\t\"x-course-id\",\n\t\t[]testutil.MasterableExercise{\n\t\t\t{ID: \"x01\", Slug: \"exercise-1\"},\n\t\t\t{ID: \"x02\", Slug: \"exercise-2\"},\n\t\t\t{ID: \"x02\", Slug: \"exercise-2\"},\n\t\t},\n\t)\n\n\tcourse, err := GetCourseByID(ctx, \"en\", \"x-course-id\")\n\tsuite.Require().NoError(err)\n\n\texercises, err := GetMasterableExercisesWithoutCoveredForCourse(ctx, \"en\", course, false, nil)\n\tsuite.Require().NoError(err)\n\n\tsuite.Require().Len(exercises, 2)\n\tsuite.Require().Equal(\"x01\", exercises[0].ID)\n\tsuite.Require().Equal(\"x02\", exercises[1].ID)\n}",
+        "confidence": 0.7
+      }
+    ],
+    "comments": [
+      {
+        "id": 3925538512,
+        "url": "https://github.com/Khan/webapp/pull/41975#discussion_r3925538512"
+      },
+      {
+        "id": 3925538531,
+        "url": "https://github.com/Khan/webapp/pull/41975#discussion_r3925538531"
+      }
+    ],
+    "proposals": [
+      {
+        "evidence": "`GetMasterableExercisesWithoutCoveredForCourse` called with literal `false` for `includeDuplicates` at resolvers/course.go:477, silently de-duplicating the pre-existing `masterableExercisesWithoutCovered` field",
+        "ids": [
+          "correctness-reviewer-1",
+          "skill-auditor-ool-1",
+          "security-auth-ool-1",
+          "api-federation-compat-1",
+          "completeness-1",
+          "holistic-1"
+        ]
+      },
+      {
+        "evidence": "`exerciseIDs := make([]string, len(course.MasterableExercisesWithoutCovered))` at getters/course.go:198 assigns by index `exerciseIDs[i] = ex.ID`, leaving `\"\"` at every skipped-duplicate position",
+        "ids": [
+          "correctness-reviewer-2",
+          "skill-auditor-ool-2",
+          "security-auth-ool-2",
+          "api-federation-compat-ool-1",
+          "holistic-3",
+          "conventions-1"
+        ]
+      },
+      {
+        "evidence": "nil-stripping branch `if masteryMechanicFilter == nil` at getters/course.go:214 strips nils for the `excludeCovered` path while `_filterExercisesByMasteryMechanic` returns nils untouched for the default path, giving `masterableExercises` two different null contracts by argument value",
+        "ids": [
+          "api-federation-compat-2",
+          "holistic-2",
+          "first-principles-2"
+        ]
+      },
+      {
+        "evidence": "test function named `TestGetMasterableExercisesWithoutCoveredForCourse_NoMMExlcudeDupes` at course_test.go:173 contains misspelling \"Exlcude\"",
+        "ids": [
+          "correctness-reviewer-5",
+          "conventions-3"
+        ]
+      }
+    ],
+    "expectedPairs": [
+      {
+        "ids": [
+          "correctness-reviewer-3",
+          "test-adequacy-1"
+        ],
+        "samePath": false,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.1565217391304348,
+          "overlap": 0.43902439024390244,
+          "sharedBigrams": 7
+        },
+        "floor": {
+          "jaccard": 0.2,
+          "overlap": 0.35,
+          "sharedBigrams": 6
+        },
+        "similar": false
+      }
+    ]
+  },
+  {
+    "pr": 41989,
+    "run": 33773028777,
+    "claims": [
+      {
+        "id": "correctness-reviewer-1",
+        "source": "correctness-reviewer",
+        "path": "services/districts/emails/send_monthly_admin_email.go",
+        "line": 1857,
+        "label": "suggestion (non-blocking)",
+        "importance": "medium",
+        "subject": "This new `crud.GetAll[models.District]` has no `.Limit()`, so it materializes every district in the country including the ineligible ones it then discards in memory \u2014 push the eligibility predicates into the query, or page it.",
+        "discussion": "This new `crud.GetAll[models.District]` has no `.Limit()`, so it materializes every district in the country including the ineligible ones it then discards in memory \u2014 push the eligibility predicates into the query, or page it. Introduced by this change. Before this diff the district-side read was `crud.GetMulti[models.District]` over keys derived from the admin UDIs that had already been found (removed at old line 1753), so it was bounded by the admin-UDI set; now it is bounded only by how many District entities exist with that country_code, and the eligibility filter runs afterwards in memory at lines 1862-1874. District is a wide model (61 `datastore:` properties in services/districts/models/district.go) and the whole entity is loaded, not a projection. The predicates being filtered in memory are stored, indexable properties \u2014 `District.EligibleForKADEmails()` at services/districts/models/district.go:451 is just `SendKADEmails() && m.RosterSyncingEnabled` over `dont_send_kad_emails`/`roster_syncing_enabled`, and `IsTest` is `is_test` \u2014 so adding them as equality filters on the query (and the matching index.yaml entry), or paging with `.Limit()` plus a cursor and handling one page per invocation, would bound the read. I traced both callers (monthly_admin_email_batch.go:444 and kad_email_subscriptions.go:529) and neither is in a transaction and neither bounds the result before this point, so nothing upstream or downstream caps it.",
+        "failure_scenario": "A monthly run for countryCode \"US\" calls getEmailableDistrictsByCountry, which GetAlls every District entity with country_code=\"US\" into one slice with no .Limit() \u2014 including test districts, KAD-email-opted-out districts, roster-syncing-disabled districts, and districts with zero admin UDIs \u2014 so the job's peak memory grows with the total rostered district count rather than with the set it actually emails, and at 100x today's district count the Cloud Run instance OOMs with no GOMEMLIMIT backstop.",
+        "confidence": 0.7
+      },
+      {
+        "id": "first-principles-1",
+        "source": "first-principles",
+        "path": "services/districts/emails/send_monthly_admin_email.go",
+        "line": 1856,
+        "label": "suggestion (non-blocking)",
+        "subject": "getEmailableDistrictsByCountry still loads every district in the country and filters is_test / roster-syncing in Go; both are indexed properties, so push them into the query too.",
+        "discussion": "getEmailableDistrictsByCountry still loads every district in the country and filters is_test / roster-syncing in Go; both are indexed properties, so push them into the query too. The PR's rationale is to stop loading a broad set and filtering it down afterward, and the UDI half of the function now does exactly that. The district half does not: the query at line 1855-1856 filters on country_code alone, and lines 1863-1871 then drop districts on `d.IsTest != testDistrictsOnly` and `d.EligibleForKADEmails()` in memory.\n\nTwo of the three district predicates are indexed datastore properties and could move into the query. In services/districts/models/district.go: line 114 is `IsTest bool `datastore:\"is_test\"`` and line 143 is `RosterSyncingEnabled bool `datastore:\"roster_syncing_enabled\"`` \u2014 neither carries `,noindex`. The third, `DontSendKADEmails` (line 92), is `datastore:\"dont_send_kad_emails,noindex\"`, so that one genuinely has to stay an in-memory check; `EligibleForKADEmails()` is `SendKADEmails() && RosterSyncingEnabled` (district.go:451).\n\nThis matters more than a normal load-less nit because the emailable district count is now the function's latency driver, not just its memory cost: `len(districts)` feeds `datastore.BatchFilterIn(query, \"district\", districtKeys)` at line 1807, which chunks by 30 (pkg/gcloud/datastore/query.go:444), and those `ceil(D/30)` queries run through a 10-slot semaphore at lines 1810-1811 \u2014 so wall-clock grows as `D/300` roundtrip waves. The comment at 1800-1804 acknowledges the batching tradeoff in the abstract but the code leaves D at \"all districts in the country\" when two of the filters that shrink it are indexable.\n\nThese are equality filters only, which datastore serves by merging single-property indexes, so I do not believe this needs a new entry in services/districts/index.yaml \u2014 worth confirming against your local emulator run, since that is the one thing that would change the cost of the suggestion.",
+        "failure_scenario": "The district fetch stays a load-everything-then-filter-in-Go scan, and since its surviving count sets the number of 30-key IN batches, the new cost driver is left larger than it needs to be \u2014 most visibly on the testDistrictsOnly=true path, which loads every non-test district in the country to keep a handful.",
+        "suggestion": "In getEmailableDistrictsByCountry, build the query as `datastore.NewQuery(models.DistrictKind).FilterField(\"country_code\", \"=\", countryCode).FilterField(\"is_test\", \"=\", testDistrictsOnly).FilterField(\"roster_syncing_enabled\", \"=\", true)`, and keep only the `d.SendKADEmails()` (DontSendKADEmails, noindex) check in the Go loop.",
+        "confidence": 0.7
+      }
+    ],
+    "comments": [
+      {
+        "id": 3926287619,
+        "url": "https://github.com/Khan/webapp/pull/41989#discussion_r3926287619"
+      },
+      {
+        "id": 3926287627,
+        "url": "https://github.com/Khan/webapp/pull/41989#discussion_r3926287627"
+      }
+    ],
+    "proposals": [
+      {
+        "evidence": "no composite index on `(is_admin, district)` for `UserDistrictInfo` in `services/districts/index.yaml`, so the `is_admin=true AND district IN [...]` query at line 1805-1807 merge-joins the global `is_admin` single-property index",
+        "ids": [
+          "skill-auditor-1",
+          "holistic-1"
+        ]
+      },
+      {
+        "evidence": "`crud.GetAll[models.District](ctx, query)` at line 1857 in `getEmailableDistrictsByCountry` has no `.Limit()`, materialising all district entities for the country into memory",
+        "ids": [
+          "correctness-reviewer-1",
+          "skill-auditor-2"
+        ]
+      },
+      {
+        "evidence": "`getAdminUDIsByDistricts` (lines 1778-1835) hand-rolls `BatchFilterIn` + parallel fan-out already implemented by `rostering.adminUDIsInDistricts` / `rostering.Parallelize` in `rostering/user_district_infos.go`",
+        "ids": [
+          "holistic-3",
+          "conventions-2"
+        ]
+      }
+    ],
+    "expectedPairs": [
+      {
+        "ids": [
+          "correctness-reviewer-1",
+          "first-principles-1"
+        ],
+        "samePath": true,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.15625,
+          "overlap": 0.3125,
+          "sharedBigrams": 4
+        },
+        "floor": {
+          "jaccard": 0.2,
+          "overlap": 0.35,
+          "sharedBigrams": 6
+        },
+        "similar": false
+      }
+    ]
+  },
+  {
+    "pr": 42000,
+    "run": 33791207054,
+    "claims": [
+      {
+        "id": "correctness-reviewer-1",
+        "source": "correctness-reviewer",
+        "path": "services/districts/templates/emails/hipr_teacher_activation_email.gohtml",
+        "line": 22,
+        "label": "issue (blocking, best-practice)",
+        "subject": "Rewritten kad_template-based email has no render test, unlike both of its siblings",
+        "discussion": "Rewritten kad_template-based email has no render test, unlike both of its siblings. Introduced by this change: both bodies are re-parented onto `emails/kad_template` and rewritten wholesale, but nothing renders them. The only HIPR test is `TestSendHIPRTeacherActivationEmail` (services/districts/rostering/emails_test.go:215), which goes through `emails.MockClient` and asserts only `Templates.TemplatePath() == \"emails/hipr_teacher_activation_email\"` \u2014 it never parses or executes the template, so it passes even if the template is broken. The two other district emails built on this same layout do have end-to-end tests that read the file from disk and push it through `prepareHTMLEmail` / the text equivalent: services/emails/serviceproviders/kad_template_test.go:115 and :256 (HTML) and :492 and :606 (text). The preview path (`CreateHIPRTeacherActivationEmailPreview`, services/districts/rostering/emails.go:582) is likewise mock-backed in tests, so it adds no coverage either. Because these templates are parsed and executed only at send time, a `{{define}}`/arity/funcmap mistake in either file would surface as a failed activation email for every KAD-trial teacher, not as a red build. Adding a `hipr_teacher_activation_email` case alongside the existing suite in kad_template_test.go (one HTML, one text) would cover the parse, the subject, and the presence of the confirm-account URL for roughly the cost of the sibling tests.",
+        "failure_scenario": "A typo in either template (e.g. a mistyped param name in the `{{i18n \"%(stepLabel)s...\"}}` call at gohtml:67, or an unbalanced `{{define}}`) ships green: `make tesc` passes because no test executes these files. At send time `prepareHTMLEmail` returns an error, `SendEmail` fails, and every teacher a district admin adds to a KAD trial never receives their activation email \u2014 the one message that contains the account-confirmation link.",
+        "confidence": 0.7
+      },
+      {
+        "id": "test-adequacy-1",
+        "source": "test-adequacy",
+        "path": "services/districts/templates/emails/hipr_teacher_activation_email.gohtml",
+        "line": 39,
+        "label": "todo (blocking)",
+        "subject": "The rewritten HTML template is never rendered by any test \u2014 add a `kad_template_test.go` case that renders it from disk and asserts the activation URL and body copy.",
+        "discussion": "The rewritten HTML template is never rendered by any test \u2014 add a `kad_template_test.go` case that renders it from disk and asserts the activation URL and body copy. `grep -rni hipr --include=*_test.go .` returns exactly one email-related hit: `services/districts/rostering/emails_test.go:249`, which asserts `emails[0].Templates.TemplatePath() == \"emails/hipr_teacher_activation_email\"`. That path goes through `pkg/emails/testing.go` `MockClient`, which only appends to `SentServiceEmails` (lines 98-136) and never parses or executes the template, so the file's contents are unverified.\n\nThe two sibling KAD emails converted onto the same layout each got a from-disk render test: `services/emails/serviceproviders/kad_template_test.go:115` (`monthly_admin_email.gohtml`) and `:256` (`start_of_year_admin_email.gohtml`). This rewrite introduces the same class of machinery those tests guard \u2014 `template \"emails/kad_template\"` with a `kad_template_content` block, `bigPurpleButton`/`purpleATag` (defined at `services/emails/serviceproviders/email_templates.go:273-278`), and eight `(param ... (purpleATag ...)) | safe` interpolations \u2014 plus a locally-defined `hipr_teacher_activation_divider` sub-template that no other file provides. It also depends on the `path` and `query_params` keys that `services/districts/rostering/emails.go:296` supplies; nothing checks the rendered output actually contains the resulting activation link.",
+        "failure_scenario": "Nothing in CI executes this rewritten template, so a template execution error (bad helper arity, missing context key) or a dropped activation URL ships silently and every KAD trial teacher receives a broken or link-less welcome email.",
+        "suggestion": "// In services/emails/serviceproviders/kad_template_test.go, alongside the\n// monthly-snapshot and start-of-year cases.\nfunc (suite *kadTemplateSuite) TestHIPRTeacherActivationEmail() {\n\tktx := suite.KAContext()\n\ttemplateBytes, err := os.ReadFile(\n\t\t\"../../districts/templates/emails/hipr_teacher_activation_email.gohtml\",\n\t)\n\tsuite.Require().NoError(err)\n\n\temailData := EmailContextData{\n\t\t\"district_provided_name\": \"Alex\",\n\t\t\"path\":                   \"/districts/activate\",\n\t\t\"query_params\":           map[string]string{\"udi\": \"test-udi-uuid\"},\n\t\t\"emailLanguage\":          \"en\",\n\t}\n\n\ttemplateStr, emailSubject, renderErr := prepareHTMLEmail(\n\t\tktx, string(templateBytes), emailData, []*graphql.SubTemplate(nil), \"en\")\n\n\tsuite.Require().NoError(renderErr)\n\tsuite.Require().Equal(\n\t\t\"Khan Academy Districts - Welcome to your Free 90-Day Trial!\",\n\t\temailSubject)\n\tsuite.Require().Contains(templateStr, \"Hi Alex,\")\n\t// Both the CTA button and the step-1 link must carry the activation flow\n\t// URL built from .path/.query_params.\n\tsuite.Require().Contains(templateStr, \"udi=test-udi-uuid\")\n\tsuite.Require().Contains(templateStr, \"Confirm your account\")\n\t// param+safe interpolation must emit live markup, not escaped text.\n\tsuite.Require().Contains(templateStr, \"<b>Add a new class</b>\")\n\tsuite.Require().NotContains(templateStr, \"&lt;b&gt;\")\n\t// The divider is defined in this file, not in kad_template.\n\tsuite.Require().Contains(templateStr, \"border-top: 1px solid #E0E1EE\")\n\tsuite.Require().Contains(templateStr,\n\t\t\"district-teacher-emails/hipr_teacher_create_class.png\")\n}",
+        "confidence": 0.7
+      }
+    ],
+    "comments": [
+      {
+        "id": 3927700618,
+        "url": "https://github.com/Khan/webapp/pull/42000#discussion_r3927700618"
+      },
+      {
+        "id": 3927700630,
+        "url": "https://github.com/Khan/webapp/pull/42000#discussion_r3927700630"
+      }
+    ],
+    "proposals": [
+      {
+        "evidence": "`hipr_teacher_activation_email.gohtml` is never parsed or executed by any test \u2014 `TestSendHIPRTeacherActivationEmail` asserts only `Templates.TemplatePath() == \"emails/hipr_teacher_activation_email\"` via `MockClient` and never calls `prepareHTMLEmail`",
+        "ids": [
+          "correctness-reviewer-1",
+          "test-adequacy-1"
+        ]
+      },
+      {
+        "evidence": "`{{canonicalURL .path .query_params}}` labeled \"Confirm your account\" appears twice in the gotxt \u2014 once at line 23 as a standalone CTA and again at line 27 as step 1 \u2014 with only the \"Get started in three steps\" heading between them",
+        "ids": [
+          "skill-auditor-ool-2",
+          "holistic-3"
+        ]
+      },
+      {
+        "evidence": "`canonicalURL \"/khan-for-educators/k4e-us-demo\" nil` at gohtml line 91, inside the \"Want to go deeper on Khanmigo? Take the %(courseLink)s\" bullet, replaces the previous Khanmigo-specific course URL (`/khan-for-educators/khanmigo-for-educators/xb4ad566b4fd3f04a:welcome-to-khanmigo-your-new-ai-teaching-assistant`) while the Khanmigo framing remains",
+        "ids": [
+          "correctness-reviewer-3",
+          "skill-auditor-ool-1",
+          "holistic-4",
+          "first-principles-1"
+        ]
+      }
+    ],
+    "expectedPairs": [
+      {
+        "ids": [
+          "correctness-reviewer-1",
+          "test-adequacy-1"
+        ],
+        "samePath": true,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.19480519480519481,
+          "overlap": 0.38461538461538464,
+          "sharedBigrams": 2
+        },
+        "floor": {
+          "jaccard": 0.2,
+          "overlap": 0.35,
+          "sharedBigrams": 6
+        },
+        "similar": false
+      }
+    ]
+  },
+  {
+    "pr": 42001,
+    "run": 33795645826,
+    "claims": [
+      {
+        "id": "correctness-reviewer-1",
+        "source": "correctness-reviewer",
+        "path": "services/humanities/resolvers/writing_coach_config.go",
+        "line": 476,
+        "label": "issue (blocking)",
+        "subject": "An empty `classrooms` list makes every error path return a success-looking response",
+        "discussion": "An empty `classrooms` list makes every error path return a success-looking response. `_mapErrorToAllClassrooms` reports errors by writing into `result.Errors`, which `mapCreateWritingCoachAssignmentInputGraphQLToResponseGraphQL` sizes as `make([]*graphql.WritingCoachConfigError, len(assignmentInput.Classrooms))` (line 464). When the client sends `classrooms: []`, that slice has length zero, so this loop body never executes and the mutation returns `{classrooms: [], errors: []}` with a nil Go error \u2014 indistinguishable from success.\n\nAn empty list is a legal value for `classrooms: [WritingCoachConfigInputClassroom!]!`: the non-null markers constrain the list and its elements, not its length, so gqlgen accepts `[]` and the resolver runs. I grepped `services/humanities/` for any `len(...Classrooms) == 0` guard or equivalent and found none, and read the full resolver plus `writing_coach_config.graphql` \u2014 nothing caps or floors the list length at any layer.\n\nThat means all three failure paths added by this change go silent for an empty list: the `RequestUser` failure (line 157), the `IsLoggedIn` failure (line 164), and the `InvalidInput` mapping failure (line 177). The unauthorized case is the notable one \u2014 a caller who is not permitted to create assignments gets an HTTP 200 with no error at all. This is introduced by this change; the previous code was a stub that returned empty slices unconditionally, so there was no error contract to violate yet.\n\nThe root cause is that one slice serves two purposes: per-classroom results and whole-request errors. This is the part of the design the PR description is asking about. Making the whole-request error independent of the input length fixes the symptom; the more thorough fix is a separate top-level error field, since a config-level validation failure is not per-classroom at all (see the related finding on error-code collapse).",
+        "failure_scenario": "An empty `classrooms` list makes every error path return a success-looking response",
+        "suggestion": "func _mapErrorToAllClassrooms(\n\terrorCode graphql.WritingCoachConfigErrorCode,\n\tresult *graphql.CreateWritingCoachAssignmentsResult,\n) *graphql.CreateWritingCoachAssignmentsResult {\n\t// `classrooms: []` is a legal input, and Errors is sized from it, so\n\t// without this there is no slot to report a whole-request failure in and\n\t// every error path would look like a success to the client.\n\tif len(result.Errors) == 0 {\n\t\tresult.Errors = []*graphql.WritingCoachConfigError{{Code: errorCode}}\n\t\treturn result\n\t}\n\tfor i := range result.Errors {\n\t\tif result.Errors[i] == nil {\n\t\t\tresult.Errors[i] = &graphql.WritingCoachConfigError{}\n\t\t}\n\t\tresult.Errors[i].Code = errorCode\n\t}\n\treturn result\n}",
+        "confidence": 0.7
+      },
+      {
+        "id": "skill-auditor-1",
+        "source": "skill-auditor",
+        "path": "services/humanities/resolvers/writing_coach_config.go",
+        "line": 476,
+        "label": "issue (blocking, best-practice)",
+        "subject": "ADR-303: `_mapErrorToAllClassrooms` populates no error when `classrooms` is empty, so every failure path returns a success-shaped result.",
+        "discussion": "ADR-303: `_mapErrorToAllClassrooms` populates no error when `classrooms` is empty, so every failure path returns a success-shaped result. The add-graphql-mutation skill states the ADR-303 contract: \"The resolver never returns a GraphQL-level error for a business failure; it returns a result object whose `error` field is populated.\"\n\nEvery failure path in the new resolver funnels through `_mapErrorToAllClassrooms`, whose entire body is a loop over the pre-sized error slice:\n\n```go\n476| \tfor i := range result.Errors {\n```\n\nThat slice is sized from the request: `464| errors := make([]*graphql.WritingCoachConfigError, len(assignmentInput.Classrooms))`. When `classrooms` is empty the loop body never runs and the helper returns a result whose `errors` list is empty \u2014 the error field is not populated.\n\nI checked whether an empty list is reachable: the schema declares `classrooms: [WritingCoachConfigInputClassroom!]!` (`services/humanities/writing_coach_config.graphql:129`) \u2014 the list is non-null but may be empty \u2014 and grepping `Classrooms` across `services/humanities/resolvers/writing_coach_config.go` and `services/humanities/writing_coach_config/create_writing_coach_assignments.go` turns up no length/emptiness validation anywhere. So an unauthenticated request with `classrooms: []` reaches line 157 and returns an error-free result.\n\nFix: have the helper fall back to a single top-level error entry when there are no classrooms to attach one to (or reject an empty `classrooms` list as `INVALID_INPUT` before the response struct is built).",
+        "failure_scenario": "A logged-out (or phantom) caller \u2014 or one sending an invalid config \u2014 who passes `classrooms: []` gets back `{classrooms: [], errors: []}`, which is byte-identical to a successful no-op, so the client silently treats a rejected mutation as a success.",
+        "suggestion": "func _mapErrorToAllClassrooms(\n\terrorCode graphql.WritingCoachConfigErrorCode,\n\tresult *graphql.CreateWritingCoachAssignmentsResult,\n) *graphql.CreateWritingCoachAssignmentsResult {\n\tif len(result.Errors) == 0 {\n\t\t// No classrooms were requested, but the mutation still failed. Report\n\t\t// one error anyway so the client can tell this apart from success.\n\t\tresult.Errors = []*graphql.WritingCoachConfigError{{Code: errorCode}}\n\t\treturn result\n\t}\n\tfor i := range result.Errors {\n\t\tif result.Errors[i] == nil {\n\t\t\tresult.Errors[i] = &graphql.WritingCoachConfigError{}\n\t\t}\n\t\tresult.Errors[i].Code = errorCode\n\t}\n\treturn result\n}",
+        "skill": "add-graphql-mutation",
+        "confidence": 0.7
+      }
+    ],
+    "comments": [
+      {
+        "id": 3928148800,
+        "url": "https://github.com/Khan/webapp/pull/42001#discussion_r3928148800"
+      },
+      {
+        "id": 3928148813,
+        "url": "https://github.com/Khan/webapp/pull/42001#discussion_r3928148813"
+      }
+    ],
+    "proposals": [
+      {
+        "evidence": "for i := range result.Errors at line 476 in _mapErrorToAllClassrooms never executes when classrooms is empty, so every failure path returns {errors: []} identical to success",
+        "ids": [
+          "correctness-reviewer-1",
+          "skill-auditor-1",
+          "api-federation-compat-1"
+        ]
+      },
+      {
+        "evidence": "Code: graphql.WritingCoachConfigErrorCodeInternal at line 218 is hardcoded for every non-nil assignment.Error, leaving NOT_ALLOWED, UNAUTHORIZED, and INVALID_INPUT unreachable for per-classroom errors",
+        "ids": [
+          "correctness-reviewer-4",
+          "first-principles-2",
+          "security-auth-ool-1"
+        ]
+      },
+      {
+        "evidence": "the if err != nil block at line 189 after CreateWritingCoachAssignments calls _mapErrorToAllClassrooms and returns early, discarding the assignments slice that already carries AssignmentIDs for completed goroutines",
+        "ids": [
+          "correctness-reviewer-3",
+          "holistic-1"
+        ]
+      },
+      {
+        "evidence": "mapCreateWritingCoachAssignmentsInputGraphQLToModels at line 422 calls validateWritingCoachConfigInput(*input.Config) but never validates input.Assignment.DueDate or StartDate against the schema's documented Must be in the future constraint",
+        "ids": [
+          "completeness-1",
+          "holistic-4"
+        ]
+      },
+      {
+        "evidence": "_mapErrorToAllClassrooms at line 472 takes a literal errorCode rather than deriving it from the error's kind, and sets neither debugMessage nor the graphql.error_code span attribute that the automap pattern provides",
+        "ids": [
+          "skill-auditor-3",
+          "holistic-2"
+        ]
+      }
+    ],
+    "expectedPairs": [
+      {
+        "ids": [
+          "correctness-reviewer-1",
+          "skill-auditor-1"
+        ],
+        "samePath": true,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.12578616352201258,
+          "overlap": 0.5405405405405406,
+          "sharedBigrams": 2
+        },
+        "floor": {
+          "jaccard": 0.14,
+          "overlap": 0.34,
+          "sharedBigrams": 4
+        },
+        "similar": false
+      }
+    ]
+  },
+  {
+    "pr": 41997,
+    "run": 33797389204,
+    "claims": [
+      {
+        "id": "correctness-reviewer-2",
+        "source": "correctness-reviewer",
+        "path": "services/districts/resolvers/encryption_preload.go",
+        "line": 16,
+        "label": "suggestion (non-blocking)",
+        "subject": "Nothing fails when a new decrypting field is added, which is the exact drift the comment warns about",
+        "discussion": "Nothing fails when a new decrypting field is added, which is the exact drift the comment warns about. Introduced by this change. The comment states the failure mode precisely \u2014 \"A decrypting field missing here silently loses the preload\" \u2014 but no test enforces it. `TestEncryptedFieldsAreSchemaFields` checks only one direction (every listed name is a real schema field); the direction that actually rots is the other one. I verified both maps are currently complete: `grep -rn KeyLoader services/districts/` gives exactly the ten UDI resolvers (Email/FirstName/FullName/LastName/DisplayName plus the five `DistrictProvided*`/`ForTeacher` wrappers that delegate to them, user_district_info.go:787-881) and the five UMI resolvers (user_meta_info.go:181-237), matching the maps entry-for-entry. So this is a maintenance-drift note, not a present-day bug: the next PII field added to `UserDistrictInfo` will quietly lose its preload with green tests. A cheap guard is a comment at each `encryption.KeyLoader.Load` call site in user_district_info.go / user_meta_info.go pointing back at these maps, or a test asserting the map key sets equal an explicit expected set so adding a field forces a deliberate update here.\n\nSecondly and more minor: the `Warn` branch at line 66 is the one path in this file no test exercises \u2014 all four preload tests assert *no* warning. A case injecting a non-not-found datastore error would pin down that the helper warns rather than swallowing a real failure.",
+        "failure_scenario": "Nothing fails when a new decrypting field is added, which is the exact drift the comment warns about",
+        "confidence": 0.7
+      },
+      {
+        "id": "skill-auditor-ool-1",
+        "source": "skill-auditor (out-of-lane)",
+        "path": "services/districts/resolvers/encryption_preload_test.go",
+        "line": 220,
+        "label": "question (non-blocking)",
+        "subject": "TestEncryptedFieldsAreSchemaFields only checks that every listed field exists in the schema; nothing checks the reverse direction \u2014 that every UDI/UMI field resolver calling encryption.KeyLoader.Load is listed in udiEncryptedFields/umiEncryptedFields \u2014 even though encryption_preload.go:16 states \"A decrypting field missing here silently loses the preload.\"",
+        "discussion": "TestEncryptedFieldsAreSchemaFields only checks that every listed field exists in the schema; nothing checks the reverse direction \u2014 that every UDI/UMI field resolver calling encryption.KeyLoader.Load is listed in udiEncryptedFields/umiEncryptedFields \u2014 even though encryption_preload.go:16 states \"A decrypting field missing here silently loses the preload.\"",
+        "failure_scenario": "A future PR adds a decrypting UserDistrictInfo field (say middleName, resolved via encryption.KeyLoader.Load like the existing ten at user_district_info.go:777-886) without adding it to udiEncryptedFields; an admin query selecting only that field then falls back to one key load per UDI, silently restoring the ~5s large-district regression this PR removed, with every test still green.",
+        "confidence": 0.7
+      }
+    ],
+    "comments": [
+      {
+        "id": 3928235338,
+        "url": "https://github.com/Khan/webapp/pull/41997#discussion_r3928235338"
+      },
+      {
+        "id": 3928235347,
+        "url": "https://github.com/Khan/webapp/pull/41997#discussion_r3928235347"
+      }
+    ],
+    "proposals": [
+      {
+        "evidence": "`encryption.PreloadMany(ctx, keyIDs)` at encryption_preload.go:68 returns before its cache-fill loop when any one key is missing, caching zero keys with no log",
+        "ids": [
+          "completeness-1",
+          "holistic-1"
+        ]
+      },
+      {
+        "evidence": "`preloadEncryptionKeysIfPIISelected` call at user_district_info.go:606 covers only `GetVisibleAdminUDIs` while `mapUDIsToGraphQL` at user_district_info.go:742 has ~12 other call sites that return UDI lists with no preload",
+        "ids": [
+          "holistic-2",
+          "first-principles-2"
+        ]
+      }
+    ],
+    "expectedPairs": [
+      {
+        "ids": [
+          "correctness-reviewer-2",
+          "skill-auditor-ool-1"
+        ],
+        "samePath": false,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.19047619047619047,
+          "overlap": 0.5161290322580645,
+          "sharedBigrams": 12
+        },
+        "floor": {
+          "jaccard": 0.2,
+          "overlap": 0.35,
+          "sharedBigrams": 6
+        },
+        "similar": false
+      }
+    ]
+  },
+  {
+    "pr": 42001,
+    "run": 33802388308,
+    "claims": [
+      {
+        "id": "correctness-reviewer-1",
+        "source": "correctness-reviewer",
+        "path": "services/humanities/resolvers/writing_coach_config.go",
+        "line": 222,
+        "label": "issue (blocking)",
+        "subject": "Per-classroom `debugMessage` sends the raw, unredacted internal error to the client",
+        "discussion": "Per-classroom `debugMessage` sends the raw, unredacted internal error to the client. `assignment.Error.Error()` puts the full internal error string \u2014 message chain plus the wrapped `errors.Fields`/`log.Fields` extras \u2014 onto `WritingCoachConfigError.debugMessage`, which is a `@consumer(name: LANG_LIT)` field returned to the browser. Every other error path in this same service goes through automap, and automap builds that field as `errors.ErrorPresenter(ctx, err, true /* redactErrors */).Message` (`services/humanities/generated/automap/automap.go:41-46`); `pkg/lib/errors/graphql_presenter.go:34-52` shows exactly what the `redactErrors` branch buys you \u2014 it keeps only the human `message` of each wrapped `khanError` and drops the extras and the stack, whereas the non-redacted branch is `kaError.Error() + StackTrace(...)`. So this line deliberately ships the shape redaction exists to suppress. The errors that reach it are real internal ones: datastore failures from `PutWritingCoachConfig`, and `errors.Internal(\"createPlatformAssignment error\", log.Fields{\"errorCode\": ...})` from `services/humanities/cross_service/assignments.go`. Introduced by this change. Note that none of the new tests select `debugMessage`, so the leak is invisible to the suite.",
+        "failure_scenario": "A teacher submits `createWritingCoachAssignments` and one classroom's datastore write fails; the mutation returns HTTP 200 with `errors[i].debugMessage` containing the raw khanError chain and its wrapped fields (datastore/entity internals, the downstream error code) straight to the browser, instead of the redacted message every other mutation in this service returns.",
+        "suggestion": "\t\t\tdebug := errors.ErrorPresenter(ktx, assignment.Error, true /* redactErrors */).Message",
+        "confidence": 0.7
+      },
+      {
+        "id": "skill-auditor-1",
+        "source": "skill-auditor",
+        "path": "services/humanities/resolvers/writing_coach_config.go",
+        "line": 222,
+        "label": "issue (blocking, best-practice)",
+        "subject": "ADR-303/automap: `debugMessage` is filled with the raw `err.Error()` string, bypassing the `ErrorPresenter` redaction automap applies.",
+        "discussion": "ADR-303/automap: `debugMessage` is filled with the raw `err.Error()` string, bypassing the `ErrorPresenter` redaction automap applies. The added line is:\n\n```go\ndebug := assignment.Error.Error()\n```\n\nand it is assigned straight to the client-visible `DebugMessage` on the next lines.\n\n`.claude/skills/add-graphql-mutation/references/automap-deep-dive.md` states the contract for this field: \"**`debugMessage`:** if (and only if) the error type declares a `debugMessage: String` field, automap fills it with `errors.ErrorPresenter(ctx, err, true /* redactErrors */)` \u2014 a message redacted for end users.\" `.claude/skills/error-handling/references/resolvers.md` says what that redaction buys: \"**End-user requests (redacted):** only the human-readable **messages** survive. The presenter walks the wrap chain, pulls each khanError's `message`, and joins them with `\" > \"`. The kind, the `errors.Fields{}`, internal function names, and the stack trace are all stripped.\"\n\nWhat I checked: the sibling generated helper `services/humanities/generated/automap/automap.go` does exactly the documented thing \u2014 `msg := errors.ErrorPresenter(ctx, err, true /* redactErrors */).Message`. And `pkg/lib/errors/errors.go:245` documents `khanError.Error()` as the opposite: \"We expose all metadata (except some special empty fields) about the error here\" \u2014 its body writes `e.source`, the kind, and every sorted `extra` field. The errors that land here are constructed with fields: `services/humanities/cross_service/assignments.go` returns `errors.Internal(\"createPlatformAssignment error\", log.Fields{\"errorCode\": ...})`, so that field value plus the internal source string is what reaches the client.\n\nFix: run it through the presenter, the way automap does.",
+        "failure_scenario": "A teacher whose classroom assignment fails receives a `debugMessage` containing the internal source location, error kind, and every `errors.Fields` value (e.g. the downstream `errorCode`) instead of the redacted user-facing message automap would produce.",
+        "suggestion": "\t\t\tdebug := errors.ErrorPresenter(ktx, assignment.Error, true /* redactErrors */).Message",
+        "skill": "add-graphql-mutation",
+        "confidence": 0.7
+      }
+    ],
+    "comments": [
+      {
+        "id": 3928667746,
+        "url": "https://github.com/Khan/webapp/pull/42001#discussion_r3928667746"
+      },
+      {
+        "id": 3928667770,
+        "url": "https://github.com/Khan/webapp/pull/42001#discussion_r3928667770"
+      }
+    ],
+    "proposals": [
+      {
+        "evidence": "`debug := assignment.Error.Error()` at line 222 assigns the raw khanError chain (source, kind, and log.Fields extras) to `DebugMessage` instead of routing through `errors.ErrorPresenter(ktx, err, true /* redactErrors */).Message`",
+        "ids": [
+          "correctness-reviewer-1",
+          "skill-auditor-1",
+          "api-federation-compat-1",
+          "holistic-1",
+          "first-principles-2"
+        ]
+      },
+      {
+        "evidence": "early return `if len(input.Assignment.Classrooms) == 0 { return &response, nil }` at line 153 runs before the `ktx.RequestUser()` and `acl.IsLoggedIn(ktx, acl.PhantomProhibited)` auth checks at lines 158\u2013166",
+        "ids": [
+          "correctness-reviewer-4",
+          "api-federation-compat-ool-1",
+          "completeness-2"
+        ]
+      },
+      {
+        "evidence": "`if err != nil` block at lines 193\u2013198 calls `_mapErrorToAllClassrooms(WritingCoachConfigErrorCodeInternal, &response)` and discards the already-populated `assignments` slice returned by `writing_coach_config.CreateWritingCoachAssignments`",
+        "ids": [
+          "correctness-reviewer-3",
+          "skill-auditor-ool-1"
+        ]
+      },
+      {
+        "evidence": "`var _maxAssignmentClassrooms = 30` at line 424 is a mutable package-level `var` instead of a `const`",
+        "ids": [
+          "correctness-reviewer-6",
+          "conventions-1"
+        ]
+      },
+      {
+        "evidence": "`errors := make([]*graphql.WritingCoachConfigError, len(assignmentInput.Classrooms))` at line 481 shadows the imported `github.com/Khan/webapp/pkg/lib/errors` package name inside `mapCreateWritingCoachAssignmentInputGraphQLToResponseGraphQL`",
+        "ids": [
+          "correctness-reviewer-5",
+          "security-auth-ool-2"
+        ]
+      }
+    ],
+    "expectedPairs": [
+      {
+        "ids": [
+          "correctness-reviewer-1",
+          "skill-auditor-1"
+        ],
+        "samePath": true,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.25,
+          "overlap": 0.40540540540540543,
+          "sharedBigrams": 2
+        },
+        "floor": {
+          "jaccard": 0.14,
+          "overlap": 0.34,
+          "sharedBigrams": 4
+        },
+        "similar": false
+      }
+    ]
+  },
+  {
+    "pr": 42024,
+    "run": 33900305826,
+    "claims": [
+      {
+        "id": "skill-auditor-2",
+        "source": "skill-auditor",
+        "path": "services/humanities/resolvers/writing_coach_platform_assignment.go",
+        "line": 20,
+        "label": "issue (blocking, best-practice)",
+        "subject": "add-graphql-field: the new entity resolver returns `nil, nil` instead of entities carrying the federation key, so `config` can never resolve.",
+        "discussion": "add-graphql-field: the new entity resolver returns `nil, nil` instead of entities carrying the federation key, so `config` can never resolve. The add-graphql-field federation reference describes the entity resolver's contract: \"The gateway calls `FindUserByKaid` (named `Find<Type>By<Key>`) to turn a key into an entity object.\" and \"It only needs to populate the key fields \u2014 the field resolvers do the rest.\" Its worked example returns the reconstructed entity: `return &graphql.User{ID: kaid, Kaid: kaid}, nil`.\n\nThe added resolver returns nothing:\n\n```go\n\t// TODO: (@hwinn4) - Implement in follow-up PR\n\tacl.OpenAccess()\n\n\treturn nil, nil\n```\n\nI traced the generated caller in `services/humanities/generated/graphql/service.go:201-214`: it does `entities, err := ec.Resolvers.Entity().FindManyWritingCoachPlatformAssignmentByAssignableEntityIDs(...)` then `for i, entity := range entities { ... list[reps[i].index] = entity }`. With a nil slice the loop body never runs, so every requested representation stays nil \u2014 no panic, but no entity either. Meanwhile `writing_coach_config.graphql` now publishes `config: WritingCoachConfig` and `gengraphql/composed_schema.graphql` was regenerated, so the field is live in the federated graph with a resolver that structurally cannot fill it. Returning at least the key-bearing entities (`&graphql.WritingCoachPlatformAssignment{AssignableEntityID: rep.AssignableEntityID}`) keeps the schema honest while `Config` remains a follow-up.",
+        "failure_scenario": "Once this deploy branch ships, every gateway `_entities` lookup for `WritingCoachPlatformAssignment` gets an empty list back from humanities, so `config` resolves to null for every assignment even though the composed schema advertises the field.",
+        "suggestion": "\tentities := make([]*graphql.WritingCoachPlatformAssignment, len(reps))\n\tfor i, rep := range reps {\n\t\t// TODO: (@hwinn4) - populate Config in a follow-up PR.\n\t\tentities[i] = &graphql.WritingCoachPlatformAssignment{\n\t\t\tAssignableEntityID: rep.AssignableEntityID,\n\t\t}\n\t}\n\n\treturn entities, nil",
+        "skill": "add-graphql-field",
+        "confidence": 0.7
+      },
+      {
+        "id": "holistic-1",
+        "source": "holistic",
+        "path": "services/humanities/resolvers/writing_coach_platform_assignment.go",
+        "line": 20,
+        "label": "suggestion (non-blocking)",
+        "importance": "medium",
+        "subject": "The stub returns `nil, nil`, so the newly-published `config` field answers `null` rather than erroring; return `errors.NotImplemented` so an unimplemented field fails loudly.",
+        "discussion": "The stub returns `nil, nil`, so the newly-published `config` field answers `null` rather than erroring; return `errors.NotImplemented` so an unimplemented field fails loudly. This PR publishes `config: WritingCoachConfig @join__field(graph: HUMANITIES)` into `gengraphql/composed_schema.graphql` while the resolver behind it is a stub. In `services/humanities/generated/graphql/service.go:203-214` the generated `resolveManyEntities` fills results with `for i, entity := range entities { list[reps[i].index] = entity }` \u2014 an empty return leaves every slot nil, so the field resolves to `null` with no error surfaced.\n\nThe repo already has the loud form for exactly this situation: the twin resolver in the owning subgraph, `services/assignments/resolvers/platform_assignment_entity.go:274-286`, calls `acl.OpenAccess()` and then returns `errors.NotImplemented(...)`, with a comment explaining why the open-access check is safe there (no data is returned; the linter requires some check). Following that same shape here keeps the two halves of this federated type consistent and makes the gap self-announcing if the follow-up slips out of this deploy branch. It would also document why `acl.OpenAccess()` is currently acceptable, which matters because the next author fills in a datastore fetch directly under that line.",
+        "failure_scenario": "A LANG_LIT client queries `config` on a WritingCoachPlatformAssignment before the follow-up PR lands; the gateway calls humanities' `_entities`, this resolver returns an empty slice, so `list[reps[i].index]` is never assigned and the client silently receives `config: null` \u2014 indistinguishable from \"this teacher set no config\" \u2014 instead of an error.",
+        "suggestion": "\t// TODO(@hwinn4): resolve the entity in a follow-up PR (LL-1109).\n\t// No data is returned, so no permission check is necessary; the linter\n\t// requires one, so the open access check suffices until then.\n\tacl.OpenAccess()\n\n\treturn nil, errors.NotImplemented(\n\t\t\"WritingCoachPlatformAssignment.config is not yet resolved by the humanities service\",\n\t)",
+        "confidence": 0.7
+      }
+    ],
+    "comments": [
+      {
+        "id": 3936609917,
+        "url": "https://github.com/Khan/webapp/pull/42024#discussion_r3936609917"
+      },
+      {
+        "id": 3936609913,
+        "url": "https://github.com/Khan/webapp/pull/42024#discussion_r3936609913"
+      }
+    ],
+    "proposals": [
+      {
+        "evidence": "`acl.OpenAccess()` at line 18 has no comment explaining it is a placeholder rather than a settled authorization decision",
+        "ids": [
+          "correctness-reviewer-1",
+          "skill-auditor-1",
+          "security-auth-1",
+          "api-federation-compat-ool-1"
+        ]
+      },
+      {
+        "evidence": "`return nil, nil` at line 20 returns an empty slice instead of a positionally-aligned `len(reps)`-length slice of `WritingCoachPlatformAssignment` key stubs",
+        "ids": [
+          "correctness-reviewer-2",
+          "skill-auditor-2",
+          "api-federation-compat-1"
+        ]
+      },
+      {
+        "evidence": "`func GetWritingCoachConfigsByIDs(ctx context.Context` uses a bare `context.Context` where sibling functions in the same file declare `interface { kacontext.Base; datastore.KAContext }`",
+        "ids": [
+          "skill-auditor-3",
+          "security-auth-ool-1",
+          "holistic-2",
+          "conventions-1"
+        ]
+      },
+      {
+        "evidence": "`return configs, nil` where `configs := make([]*models.WritingCoachConfig, len(ids))` is a slice of nil pointers, making the unimplemented stub indistinguishable from a successful empty lookup",
+        "ids": [
+          "skill-auditor-ool-1",
+          "api-federation-compat-ool-2",
+          "completeness-2"
+        ]
+      },
+      {
+        "evidence": "`extend type WritingCoachPlatformAssignment` block is indented 2 spaces while the rest of the file uses 4-space indentation",
+        "ids": [
+          "skill-auditor-4",
+          "conventions-2"
+        ]
+      }
+    ],
+    "expectedPairs": [
+      {
+        "ids": [
+          "skill-auditor-2",
+          "holistic-1"
+        ],
+        "samePath": true,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.2028985507246377,
+          "overlap": 0.3684210526315789,
+          "sharedBigrams": 3
+        },
+        "floor": {
+          "jaccard": 0.14,
+          "overlap": 0.34,
+          "sharedBigrams": 4
+        },
+        "similar": false
+      }
+    ]
+  },
+  {
+    "pr": 42034,
+    "run": 33921953823,
+    "claims": [
+      {
+        "id": "correctness-reviewer-3",
+        "source": "correctness-reviewer",
+        "path": "services/ai-guide/langlit/handlers.go",
+        "line": 228,
+        "label": "issue (blocking)",
+        "subject": "Attempts that can never be warmed are re-classified as cold and re-migrated on every single request",
+        "discussion": "Attempts that can never be warmed are re-classified as cold and re-migrated on every single request. Introduced by this change. The classification switch treats \"cold\" as `default` \u2014 i.e. anything that is neither (`WordPair != \"\" && type matches`) nor (`type set && type differs`). Two categories fall into `default` permanently, so the lazy migration never converges for them:\n\n1. **Challenge missing.** Lines 310-313 skip an attempt whose challenge was deleted or archived and leave it cold by design. On the next request that attempt is `default` again, so its key is re-added to the `GetMulti` at line 298 \u2014 forever, once per render.\n2. **Legitimately empty pair.** An attempt whose `ChallengeType` *equals* `challengeType` but whose `WordPair` is `\"\"` fails case 1 (empty pair) and fails case 2 (types are equal), so it lands in `default`. The backfill then writes it back with `WordPair = \"\"` (line 316/325) and the next request classifies it as cold again \u2014 and this one costs a `PutMulti` write, not just a read, on every render. This is not hypothetical: the doc comment the PR adds at `models/langlit_challenge.go:309-312` states outright that \"a challenge with no IncorrectForm token legitimately yields ''\".\n\nI checked whether case 2 is reachable for freshly generated content: `isValidDependencyOutput` (`langlit_challenge_component.go:536-542`) does require at least one token with a non-empty `IncorrectForm`, so newly generated challenges are safe. That guard does not cover challenges written before it existed, nor the deleted-challenge path, which is unconditional.\n\nEffect: a steady per-request datastore read (and, for category 2, write) amplification that the \"improve in performance over time\" story in the PR description assumes away. The fix is to make \"already attempted migration\" distinguishable from \"never attempted\" \u2014 e.g. treat `ChallengeType != \"\"` as warm regardless of `WordPair`, and record a sentinel (or skip re-queuing) for attempts whose challenge could not be hydrated.",
+        "failure_scenario": "Attempts that can never be warmed are re-classified as cold and re-migrated on every single request",
+        "suggestion": "\t\tswitch {\n\t\tcase attempt.ChallengeType == challengeType:\n\t\t\t// Warm matching attempt; an empty WordPair is a legitimate\n\t\t\t// value (no IncorrectForm token), not a migration signal.\n\t\t\tif attempt.WordPair != \"\" && _attemptAllCorrect(attempt) {\n\t\t\t\tcorrectCounts[attempt.WordPair]++\n\t\t\t}\n\t\tcase attempt.ChallengeType != \"\":\n\t\t\t// Warm attempt of another type \u2014 not part of this type's set.\n\t\tdefault:\n\t\t\t// Cold attempt \u2014 missing challenge_type.\n\t\t\tcold = append(cold, attempt)\n\t\t}",
+        "confidence": 0.7
+      },
+      {
+        "id": "holistic-1",
+        "source": "holistic",
+        "path": "services/ai-guide/langlit/handlers.go",
+        "line": 222,
+        "label": "issue (blocking)",
+        "subject": "Empty WordPair is used as the \"needs migration\" sentinel, but it is also a legitimate warm value, so those attempts never converge and are re-hydrated and re-written on every request.",
+        "discussion": "Empty WordPair is used as the \"needs migration\" sentinel, but it is also a legitimate warm value, so those attempts never converge and are re-hydrated and re-written on every request. The switch at handlers.go:221-231 has three arms. An attempt with `ChallengeType == challengeType` and `WordPair == \"\"` fails arm 1 (`WordPair != \"\"`) and fails arm 2 (`ChallengeType != challengeType`), so it falls to `default` and is appended to `cold`. `_backfillLanglitAttempts` then hydrates the challenge and writes back `models.ExtractWordPair(challenge)`, which returns \"\" again (models/langlit_challenge.go:224-235 returns \"\" when no token carries an IncorrectForm) \u2014 the attempt is written with the exact same values and is cold again on the next request. The same holds for the `challenge == nil` branch at handlers.go:310-314, which deliberately leaves the attempt cold; `DeleteLanglitChallenge` exists at handlers.go:656, so deleted challenges are reachable.\n\nThis is doubled per request: `LanglitChallengeComponent` calls `ComputeProvenWordPairs` and then `ComputeSeenCorrectPairs`, and both run `_computeCorrectPairs` over the same slice. Warm attempts are deduped only because the first call mutates them in place \u2014 which is exactly what does not happen for this class.\n\nThe PR description's premise is \"the data will be seamlessly upgraded and improve in performance over time\". For this class it does the opposite: a permanent extra datastore read and an idempotent-but-repeated write on the student-facing challenge-fetch path, against a WrittenOnceModel. The models comment at langlit_challenge.go:308-312 already notes that \"\" is ambiguous; the code does not act on that.",
+        "failure_scenario": "A student attempts a word-pair challenge whose content has no IncorrectForm token (or whose challenge is later deleted): the attempt is stored with ChallengeType set but WordPair \"\", so every later challenge fetch re-classifies it as cold and re-issues GetMulti + PutMulti for it \u2014 twice per request, forever.",
+        "suggestion": "\t\tswitch {\n\t\tcase attempt.ChallengeType != \"\":\n\t\t\t// Warm (migrated). Count only matching-type attempts that carry a\n\t\t\t// pair; a matching-type attempt with no pair is warm-and-pairless,\n\t\t\t// not cold, so it must not be re-backfilled.\n\t\t\tif attempt.ChallengeType == challengeType &&\n\t\t\t\tattempt.WordPair != \"\" && _attemptAllCorrect(attempt) {\n\t\t\t\tcorrectCounts[attempt.WordPair]++\n\t\t\t}\n\t\tdefault:\n\t\t\t// Cold attempt \u2014 missing challenge_type.\n\t\t\tcold = append(cold, attempt)\n\t\t}",
+        "confidence": 0.7
+      },
+      {
+        "id": "completeness-2",
+        "source": "completeness",
+        "path": "services/ai-guide/langlit/handlers.go",
+        "line": 313,
+        "label": "suggestion (non-blocking)",
+        "importance": "medium",
+        "subject": "Cold attempts whose challenge is missing (or yields an empty word pair) are never written back, so they re-hydrate on every request forever instead of migrating lazily as the description promises.",
+        "discussion": "Cold attempts whose challenge is missing (or yields an empty word pair) are never written back, so they re-hydrate on every request forever instead of migrating lazily as the description promises. The PR description states \"the actual migration is done lazily... we never need to run an actual migration, because the data will be seamlessly upgraded and improve in performance over time.\" Two paths never reach that steady state.\n\n1. In `_backfillLanglitAttempts`, when `challenge == nil` (line 310\u2013313) the attempt is skipped with `continue`, so no key is appended to `putKeys`. Nothing marks the attempt as processed, so `_computeCorrectPairs` classifies it into the `default:` (cold) branch again on the next call and `GetMulti` re-fetches the missing key every time.\n\n2. The `default:` branch at line 228 is also reached for a warm attempt whose `ChallengeType` matches but whose `WordPair` is `\"\"`. `models.ExtractWordPair` returns `\"\"` when no token carries an `IncorrectForm`, and the model comment you added on `WordPair` (langlit_challenge.go:309-312) explicitly acknowledges \"a challenge with no IncorrectForm token legitimately yields ''\". `isValidDependencyOutput` (entry_components/langlit_challenge_component.go:537-541) only guarantees this for newly generated challenges, not for ones cached before that validation existed. Such attempts are re-hydrated and re-written on every request.\n\nA persisted \"migration attempted\" signal (e.g. writing `ChallengeType` alone, or a sentinel `WordPair`) would let both cases settle.",
+        "failure_scenario": "A student whose in-scope attempt points at a challenge that has since been deleted (or at a word-pair-type challenge with no IncorrectForm token) keeps that attempt permanently \"cold\": every subsequent langlit challenge request re-runs the datastore `GetMulti` hydration for it and never writes the fields back, so the \"lazily migrated, improves in performance over time\" claim never comes true for those attempts.",
+        "confidence": 0.7
+      }
+    ],
+    "comments": [
+      {
+        "id": 3938185827,
+        "url": "https://github.com/Khan/webapp/pull/42034#discussion_r3938185827"
+      },
+      {
+        "id": 3938185831,
+        "url": "https://github.com/Khan/webapp/pull/42034#discussion_r3938185831"
+      },
+      {
+        "id": 3938185834,
+        "url": "https://github.com/Khan/webapp/pull/42034#discussion_r3938185834"
+      }
+    ],
+    "proposals": [
+      {
+        "evidence": "`continue // regenerate with the avoid list emphasized` at line 1066 re-submits an identical params map with the same `avoidPairs` slice computed once before the loop (line 836); nothing is mutated between iterations",
+        "ids": [
+          "correctness-reviewer-5",
+          "holistic-3",
+          "first-principles-3",
+          "documentation-3",
+          "completeness-3"
+        ]
+      },
+      {
+        "evidence": "five `options` entries (30, 35, 40, 45, 50) deleted from the `langlit-*-iterations` SINGLE_SELECT block at line 83 of `langlit-frequently-confused-words.json`",
+        "ids": [
+          "completeness-1",
+          "holistic-4"
+        ]
+      },
+      {
+        "evidence": "`ctx.Datastore().PutMulti(ctx, putKeys, putAttempts)` at line 332 in `_backfillLanglitAttempts` writes entities derived from Datastore-read attempts while `LanglitChallengeAttempt.TransactionSafetyPolicy()` returns `WrittenOnceModel`",
+        "ids": [
+          "skill-auditor-1",
+          "security-auth-ool-1"
+        ]
+      },
+      {
+        "evidence": "`default:` arm in `_computeCorrectPairs` switch at line ~228 catches attempts where `attempt.ChallengeType == challengeType` and `attempt.WordPair == \"\"`, treating legitimate empty-pair warm attempts as permanently cold",
+        "ids": [
+          "holistic-1",
+          "skill-auditor-ool-1"
+        ]
+      },
+      {
+        "evidence": "`_backfillLanglitAttempts` writes `WordPair: \"\"` for challenges with no IncorrectForm token and skips writing any sentinel when `challenge == nil` (line 310-313), leaving both categories permanently in the `default:` (cold) arm on every subsequent call",
+        "ids": [
+          "correctness-reviewer-3",
+          "completeness-2"
+        ]
+      }
+    ],
+    "expectedPairs": [
+      {
+        "ids": [
+          "correctness-reviewer-3",
+          "holistic-1"
+        ],
+        "samePath": true,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.1761006289308176,
+          "overlap": 0.6511627906976745,
+          "sharedBigrams": 4
+        },
+        "floor": {
+          "jaccard": 0.2,
+          "overlap": 0.35,
+          "sharedBigrams": 6
+        },
+        "similar": false
+      },
+      {
+        "ids": [
+          "correctness-reviewer-3",
+          "completeness-2"
+        ],
+        "samePath": true,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.1746987951807229,
+          "overlap": 0.5686274509803921,
+          "sharedBigrams": 8
+        },
+        "floor": {
+          "jaccard": 0.2,
+          "overlap": 0.35,
+          "sharedBigrams": 6
+        },
+        "similar": false
+      }
+    ]
+  },
+  {
+    "pr": 42039,
+    "run": 33931913892,
+    "claims": [
+      {
+        "id": "correctness-reviewer-1",
+        "source": "correctness-reviewer",
+        "path": "services/progress-reports/schema.graphql",
+        "line": 590,
+        "label": "issue (blocking)",
+        "subject": "`progressFrom`/`progressUpTo` are deleted from the filter input and the output type with no `@deprecated` window, which hard-breaks any already-shipped client that still names them.",
+        "discussion": "`progressFrom`/`progressUpTo` are deleted from the filter input and the output type with no `@deprecated` window, which hard-breaks any already-shipped client that still names them. Introduced by this change. Both hunks remove published fields: the input `TeacherOverallProgressReportFilters.progressFrom`/`progressUpTo` here, and the output `TeacherOverallProgressReport.progressFrom`/`progressUpTo` at line 779. Removing a field is not a null-out \u2014 the gateway rejects the operation at validation, so a client that names either one loses the entire query. This repo's own guidance says so explicitly (`.agents/skills/add-graphql-field/SKILL.md`): \"**removing, renaming, or retyping** an existing field ... breaks already-shipped clients \u2014 the graph is federated, the gateway serves a persisted-query *safelist*, and the mobile floor is **8.4.1** (old app binaries can't be patched). The safe path is `@deprecated(reason: \\\"\u2026\\\")` (keep serving it).\" I checked the in-repo blast radius and it is clean: grepping the checkout for `teacherOverallProgressReport` outside `*/generated/**` turns up exactly one caller, `services/coaches/cross_service/classroom_skill_levels.go:27`, and it passes no `filters` and selects only `skillsLevels`, so `make tesc` passing does not tell you anything about external clients. I also confirmed codegen was committed (`git show --stat HEAD` includes `gengraphql/composed_schema.graphql`, `services/progress-reports/generated/graphql/{exec,models}.go`, and `services/coaches/generated/genqlient/queries.go`), so this is purely the compatibility question, not a missing-`make graphql` question. What is outside this checkout is the web frontend and mobile safelists \u2014 please confirm no shipped client names these four fields before landing; if you cannot, deprecate for one release instead of deleting. The PR description's \"the data range is unused and the filters aren't even wired up\" is a good reason to *retire* them, but it speaks to the fields being useless, not to whether a client still selects them.",
+        "failure_scenario": "A shipped web or mobile client whose persisted query passes `filters: {progressFrom: ...}` or selects `TeacherOverallProgressReport.progressFrom`/`progressUpTo` fails GraphQL validation once this deploys \u2014 the whole operation errors out with \"Unknown field\" instead of the field merely returning null, so the report page renders nothing.",
+        "suggestion": "input TeacherOverallProgressReportFilters {\n    \"\"\"The start date. Unused: this filter was never wired into the query.\"\"\"\n    progressFrom: DateTime @deprecated(reason: \"Never implemented; ignored. Will be removed after clients stop sending it.\")\n\n    \"\"\"The end date. Unused: this filter was never wired into the query.\"\"\"\n    progressUpTo: DateTime @deprecated(reason: \"Never implemented; ignored. Will be removed after clients stop sending it.\")\n",
+        "confidence": 0.7
+      },
+      {
+        "id": "skill-auditor-1",
+        "source": "skill-auditor",
+        "path": "services/progress-reports/schema.graphql",
+        "line": 767,
+        "label": "issue (blocking, best-practice)",
+        "subject": "GraphQL schema: `progressFrom`/`progressUpTo` are deleted outright instead of `@deprecated`, which breaks already-shipped clients.",
+        "discussion": "GraphQL schema: `progressFrom`/`progressUpTo` are deleted outright instead of `@deprecated`, which breaks already-shipped clients. The `add-graphql-field` skill states the rule directly: \"**Additive is safe; changing what already ships is breaking.** Adding a field, query, type, input, or *output* enum value doesn't break existing clients. But **removing**, renaming, or retyping an existing field, **dropping an enum value**, or **tightening** an argument/nullability breaks already-shipped clients \u2014 the graph is federated, the gateway serves a persisted-query *safelist*, and the mobile floor is **8.4.1** (old app binaries can't be patched). The safe path is `@deprecated(reason: \"\u2026\")` (keep serving it)\".\n\nThis PR deletes rather than deprecates, in both the input and the output type \u2014 e.g. `\"\"\"The start date, if absent defaults to 'beginning of time'\"\"\"` / `    progressFrom: DateTime` from `input TeacherOverallProgressReportFilters`, and `    progressFrom: DateTime` / `    progressUpTo: DateTime` from `type TeacherOverallProgressReport`. The input-side removal is the sharper edge: an unknown input field is a validation error, so a stale client does not merely get a null field, its whole query is rejected.\n\nWhat I checked on the checkout: `grep -rli teacherOverallProgressReport` finds only the `coaches` service as an in-repo consumer, and its regenerated `services/coaches/generated/genqlient/queries.go` hunk changes only a doc comment \u2014 it never selected these fields. The composed artifacts (`gengraphql/composed_schema.graphql`) were regenerated, so that part of the skill's checklist is satisfied. What I could not check from this repo is the web/mobile client side, which is exactly the population the rule is written to protect; the PR description's claim that \"the filters aren't even wired up\" covers the server-side plumbing, not whether a shipped operation still names the fields. If you have confirmed no persisted/safelisted operation and no \u22658.4.1 app build references them, say so on the PR and this is fine to land; otherwise mark the four fields `@deprecated(reason: \"\u2026\")` now and delete them after the clients age out.",
+        "failure_scenario": "A shipped client (mobile floor 8.4.1, or a persisted web operation) that still sends `progressFrom`/`progressUpTo` in `TeacherOverallProgressReportFilters` or selects them on `TeacherOverallProgressReport` starts failing GraphQL validation the moment this deploys, blanking the whole classroom skills report for those users, and old app binaries cannot be patched.",
+        "skill": "add-graphql-field",
+        "confidence": 0.7
+      },
+      {
+        "id": "api-federation-compat-2",
+        "source": "api-federation-compat",
+        "path": "services/progress-reports/schema.graphql",
+        "line": 589,
+        "label": "issue (blocking)",
+        "subject": "The same removal narrows the `TeacherOverallProgressReportFilters` input type, which rejects any shipped client that still sends `progressFrom`/`progressUpTo` in the filter.",
+        "discussion": "Separate from the output-field removal: `progressFrom` and `progressUpTo` also disappear from `input TeacherOverallProgressReportFilters`, and the composed-schema hunk (@@ -78241,12 +78228,6 @@) carries that narrowing to the gateway. Removing an input field is breaking in the opposite direction from removing an output field \u2014 it breaks clients that *send* the value, not ones that read it, so a client can trip this even if it never selected `progressFrom` in its selection set.\n\nThe PR description says the filters \"aren't even wired up,\" and that is true of the server: the resolver ignored the two values apart from echoing them back. But an ignored input field is still an *accepted* input field. Today a client sending `filters: {progressFrom: $from}` gets a successful (if unfiltered) response; after this change the same document fails validation outright.\n\nThe fix is the same shape as for the output fields \u2014 keep the two input fields, add `@deprecated(reason: \"...\")`, and drop them in a follow-up once no shipped operation sends them. That still gets you the dead code deleted from the resolver now.",
+        "failure_scenario": "A shipped client that passes `filters: {progressFrom: $from, progressUpTo: $to}` to `teacherOverallProgressReport` \u2014 legal today because both input fields exist and are optional \u2014 has its operation rejected at validation (`Field \"progressFrom\" is not defined by type \"TeacherOverallProgressReportFilters\"`) as soon as the narrowed input type deploys.",
+        "confidence": 0.65,
+        "rule_quote": "But **removing, renaming, or retyping** an existing field, **dropping an enum value**, or **tightening** an argument/nullability breaks already-shipped clients \u2014 the graph is federated, the gateway serves a persisted-query *safelist*, and the mobile floor is **8.4.1** (old app binaries can't be patched). The safe path is `@deprecated(reason: \"\u2026\")` (keep serving it) or `@replaces(name: \"\u2026\")` for a backward-compatible rename"
+      }
+    ],
+    "comments": [
+      {
+        "id": 3938792727,
+        "url": "https://github.com/Khan/webapp/pull/42039#discussion_r3938792727"
+      },
+      {
+        "id": 3938792729,
+        "url": "https://github.com/Khan/webapp/pull/42039#discussion_r3938792729"
+      },
+      {
+        "id": 3938792734,
+        "url": "https://github.com/Khan/webapp/pull/42039#discussion_r3938792734"
+      }
+    ],
+    "proposals": [
+      {
+        "evidence": "progressFrom: DateTime and progressUpTo: DateTime deleted from both `input TeacherOverallProgressReportFilters` and `type TeacherOverallProgressReport` without `@deprecated`",
+        "ids": [
+          "correctness-reviewer-1",
+          "skill-auditor-1",
+          "holistic-1",
+          "first-principles-1",
+          "api-federation-compat-1"
+        ]
+      },
+      {
+        "evidence": "The type-level docstring `\"The date range for the Teacher Overall Progress Report\"` on `input TeacherOverallProgressReportFilters` (line 587) still describes date fields after `progressFrom` and `progressUpTo` were removed",
+        "ids": [
+          "correctness-reviewer-2",
+          "security-auth-ool-1",
+          "completeness-1",
+          "holistic-2",
+          "conventions-1",
+          "documentation-1"
+        ]
+      }
+    ],
+    "expectedPairs": [
+      {
+        "ids": [
+          "correctness-reviewer-1",
+          "skill-auditor-1"
+        ],
+        "samePath": true,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.3484848484848485,
+          "overlap": 0.5476190476190477,
+          "sharedBigrams": 5
+        },
+        "floor": {
+          "jaccard": 0.2,
+          "overlap": 0.35,
+          "sharedBigrams": 6
+        },
+        "similar": false
+      },
+      {
+        "ids": [
+          "correctness-reviewer-1",
+          "api-federation-compat-2"
+        ],
+        "samePath": true,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.26153846153846155,
+          "overlap": 0.4857142857142857,
+          "sharedBigrams": 5
+        },
+        "floor": {
+          "jaccard": 0.2,
+          "overlap": 0.35,
+          "sharedBigrams": 6
+        },
+        "similar": false
+      }
+    ]
+  },
+  {
+    "pr": 42041,
+    "run": 34189923641,
+    "claims": [
+      {
+        "id": "correctness-reviewer-2",
+        "source": "correctness-reviewer",
+        "path": "services/assessments/learner_insights/get_or_create_learner_insights_test.go",
+        "line": 51,
+        "label": "todo (blocking)",
+        "subject": "`WithStandardSubject`/`WithStandardGradeLevel` are set on the fixture but nothing verifies the values reach `GenerateAssessmentEytLearnerInsightsInput`, so the assessments half of this PR is untested.",
+        "discussion": "`WithStandardSubject`/`WithStandardGradeLevel` are set on the fixture but nothing verifies the values reach `GenerateAssessmentEytLearnerInsightsInput`, so the assessments half of this PR is untested. Introduced by this change \u2014 the whole point of the assessments-side diff is that subject and grade level now flow from the SQL row into the mutation input, and that path has no assertion behind it.\n\nWhat I checked: `services/assessments/cross_service/mock_ai_guide.go:25-47` \u2014 `MockGenerateLearnerInsights` matches on operation name only and returns a fixed `js.Obj`, with no variable capture or matcher. The `WithStandardSubject(\"ELA\")` / `WithStandardGradeLevel(\"9-10\")` calls therefore only affect the sqlmock row, which nothing downstream asserts on.\n\nThe PR's own test plan still has \"Update unit tests\" unchecked, so this is likely already on your list \u2014 flagging it so it does not get lost. Worth capturing the request variables (or adding a matcher on the mux handler) and asserting `Subject == \"ELA\"` and `GradeLevel == \"9-10\"`, plus a case where the standard row has NULL subject/grade to pin down the empty-string behavior.",
+        "failure_scenario": "If the loop in `GenerateLearnerInsightsWithoutSaving` were wrong \u2014 e.g. it read `result.StandardSubject.String` from the wrong column, inverted the `== \"\"` guard, or omitted `Subject`/`GradeLevel` from the input struct entirely \u2014 this test still passes and reports green. `cross_service.MockGenerateLearnerInsights` registers via `mux.HandleOperation(\"Assessments_GenerateAssessmentEytLearnerInsights\", ...)` and returns a canned response; it never inspects the request variables. The assertions at the bottom of the test only check the student/teacher summary strings that the mock itself supplied.",
+        "confidence": 0.7
+      },
+      {
+        "id": "test-adequacy-1",
+        "source": "test-adequacy",
+        "path": "services/assessments/learner_insights/get_or_create_learner_insights.go",
+        "line": 224,
+        "label": "todo (blocking)",
+        "subject": "No test asserts the new `subject`/`gradeLevel` reach the ai-guide mutation input \u2014 add an `OperationArguments()` check on the mocked mutation.",
+        "discussion": "No test asserts the new `subject`/`gradeLevel` reach the ai-guide mutation input \u2014 add an `OperationArguments()` check on the mocked mutation. `get_or_create_learner_insights_test.go` now calls `WithStandardSubject(\"ELA\")` / `WithStandardGradeLevel(\"9-10\")` (lines 44-52), but nothing downstream asserts those values. `cross_service.MockGenerateLearnerInsights` (services/assessments/cross_service/mock_ai_guide.go:25) uses `mux.HandleOperation`, which matches on operation name only and ignores variables, and the test's assertions only cover `learnerInsights.DetailedSummaries` and the two summary strings \u2014 so the new lines 194-202 and 224-225 have no assertion behind them. `grep -rn \"GradeLevel\\|gradeLevel\" services/assessments --include=*_test.go` returns only `delivery/` hits, i.e. no test anywhere in assessments checks the mutation input. The mock handler already returns a `*gqlclient.SimpleHandler` whose `OperationArguments()` exposes the sent variables (pkg/web/gqlclient/gql_testing/mux.go:421; used this way in services/gap-finder/gap_filler/create_test.go:102), so the assertion is a two-line addition. A second case with a NULL subject on the first row would also cover the first-non-empty fallback the comment describes.",
+        "failure_scenario": "If `Subject`/`GradeLevel` were wired to the wrong column (or left empty because the first row's `standard_subject` is NULL and the loop's fallback broke), every learner-insight prompt would silently receive an empty subject/grade level and `TestGetOrCreateLearnerInsights_CreateSuccess` would still pass.",
+        "suggestion": "\thandler := cross_service.MockGenerateLearnerInsights(\n\t\tmux,\n\t\tstudentLearnerInsights,\n\t\tteacherLearnerInsights,\n\t\tgeneratedDetailedSummaries,\n\t)\n\n\t// ... after the existing assertions:\n\tcalls := handler.OperationArguments()\n\tsuite.Require().Len(calls, 1)\n\tinput, ok := calls[0][\"input\"].(map[string]any)\n\tsuite.Require().True(ok)\n\tsuite.Require().Equal(standardSubject, input[\"subject\"])\n\tsuite.Require().Equal(standardGradeLevel, input[\"gradeLevel\"])",
+        "confidence": 0.7
+      }
+    ],
+    "comments": [
+      {
+        "id": 3954715159,
+        "url": "https://github.com/Khan/webapp/pull/42041#discussion_r3954715159"
+      },
+      {
+        "id": 3954715170,
+        "url": "https://github.com/Khan/webapp/pull/42041#discussion_r3954715170"
+      }
+    ],
+    "proposals": [
+      {
+        "evidence": "`subject: String!` and `gradeLevel: String!` in `GenerateAssessmentEytLearnerInsightsInput` are required non-null with no default, breaking old callers during rolling deploys",
+        "ids": [
+          "correctness-reviewer-1",
+          "skill-auditor-ool-1",
+          "api-federation-compat-1"
+        ]
+      },
+      {
+        "evidence": "`GetSubjectForCode` and `GetGradeLevelForCode` in `learner_insights_standards.go` have zero callers after this diff removes the call sites in `preprocessor_LIStudent.go`",
+        "ids": [
+          "correctness-reviewer-4",
+          "skill-auditor-ool-4",
+          "holistic-2",
+          "completeness-1"
+        ]
+      },
+      {
+        "evidence": "`formatStudentGradeLevel` `default:` branch returns `string(GradeLevelHS)` for any input outside the five listed cases, silently misclassifying grades like \"3\", \"9\", or \"\"",
+        "ids": [
+          "security-auth-ool-1",
+          "api-federation-compat-ool-2",
+          "skill-auditor-ool-2",
+          "first-principles-1"
+        ]
+      },
+      {
+        "evidence": "`result.StandardSubject.String` and `result.StandardGradeLevel.String` read from nullable `pgtype.Text` columns without a `.Valid` check, sending `\"\"` as a valid `String!`",
+        "ids": [
+          "skill-auditor-ool-3",
+          "api-federation-compat-2"
+        ]
+      },
+      {
+        "evidence": "`<Code>%s</Code>` element removed from `<AssessmentContext>` in the merged `generateSingleItemXML` template",
+        "ids": [
+          "correctness-reviewer-5",
+          "api-federation-compat-ool-1",
+          "completeness-2",
+          "holistic-4"
+        ]
+      },
+      {
+        "evidence": "`GetSubjectForCode` and `GetGradeLevelForCode` have zero callers after the last call sites in `preprocessor_LITeacherItem.go` are removed",
+        "ids": [
+          "first-principles-2",
+          "conventions-1"
+        ]
+      }
+    ],
+    "expectedPairs": [
+      {
+        "ids": [
+          "correctness-reviewer-2",
+          "test-adequacy-1"
+        ],
+        "samePath": false,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.12222222222222222,
+          "overlap": 0.275,
+          "sharedBigrams": 2
+        },
+        "floor": {
+          "jaccard": 0.2,
+          "overlap": 0.35,
+          "sharedBigrams": 6
+        },
+        "similar": false
+      }
+    ]
+  },
+  {
+    "pr": 42041,
+    "run": 34189923641,
+    "claims": [
+      {
+        "id": "completeness-1",
+        "source": "completeness",
+        "path": "services/ai-guide/internal_reasoning/preprocessors/preprocessor_LIStudent.go",
+        "line": 51,
+        "label": "suggestion (non-blocking)",
+        "importance": "medium",
+        "subject": "This removes the last callers of `GetSubjectForCode`/`GetGradeLevelForCode` but leaves both exported helpers in place \u2014 delete them so the map dependency is actually gone.",
+        "discussion": "This removes the last callers of `GetSubjectForCode`/`GetGradeLevelForCode` but leaves both exported helpers in place \u2014 delete them so the map dependency is actually gone. `grep -rn \"GetSubjectForCode\\|GetGradeLevelForCode\" --include=*.go services/` returns only their definitions in `services/ai-guide/internal_reasoning/preprocessors/learner_insights_standards.go` (lines 129 and 140) after this diff removes the two call sites (this line and `insights/assessments/learner_insights.go:44`). `GetSkillsForCode` still has real callers (`services/assessments/resolvers/get_or_create_learner_insights.go:172`, `resolvers/reporting/classroom_insights.go:350`), so `StandardsToSkillsMap` itself must stay \u2014 only the two subject/grade accessors are dead. The root CLAUDE.md asks for genuinely-unused code to be deleted outright rather than left behind.",
+        "failure_scenario": "The PR states it removes ai-guide's dependency on the hard-coded standards map, but `GetSubjectForCode` and `GetGradeLevelForCode` in learner_insights_standards.go now have zero callers and stay exported, so a future caller can still silently derive subject/grade from the stale map instead of the values assessments now sends.",
+        "suggestion": "// in learner_insights_standards.go: delete GetGradeLevelForCode and\n// GetSubjectForCode (and the now-unused Subject/GradeLevel fields on\n// StandardMapping if nothing else reads them); keep GetSkillsForCode.",
+        "confidence": 0.7
+      },
+      {
+        "id": "first-principles-2",
+        "source": "first-principles",
+        "path": "services/ai-guide/internal_reasoning/preprocessors/preprocessor_LITeacherItem.go",
+        "line": 152,
+        "label": "suggestion (non-blocking)",
+        "subject": "This PR removes the last callers of GetSubjectForCode and GetGradeLevelForCode \u2014 delete both functions so the stated \"removes ai-guide's dependency on that map\" is actually true in the tree.",
+        "discussion": "This PR removes the last callers of GetSubjectForCode and GetGradeLevelForCode \u2014 delete both functions so the stated \"removes ai-guide's dependency on that map\" is actually true in the tree. `grep -rn \"GetSubjectForCode\\|GetGradeLevelForCode\" --include=*.go` over the checkout after this diff returns only the definitions in `services/ai-guide/internal_reasoning/preprocessors/learner_insights_standards.go:129,140` \u2014 the two call sites this PR replaces (here, and preprocessor_LIStudent.go:51) were the only ones. The map itself must stay: `GetSkillsForCode` is still called from services/assessments/resolvers/get_or_create_learner_insights.go:172 and services/assessments/resolvers/reporting/classroom_insights.go:350. But the Subject and GradeLevel fields of StandardMapping now have no reader, and the root CLAUDE.md says to delete genuinely-unused code outright rather than leave it behind.",
+        "failure_scenario": "Two now-unreachable accessors over a 554-line hard-coded map stay in the tree, so the next reader takes them as a live alternative source of subject/grade and the change's stated goal reads as done when the map is still there.",
+        "suggestion": "Delete `GetGradeLevelForCode` and `GetSubjectForCode` from learner_insights_standards.go in this PR (and, if nothing else reads them, the `Subject`/`GradeLevel` fields of `StandardMapping`), leaving `GetSkillsForCode` and the map for its remaining assessments callers.",
+        "confidence": 0.7
+      }
+    ],
+    "comments": [
+      {
+        "id": 3954715178,
+        "url": "https://github.com/Khan/webapp/pull/42041#discussion_r3954715178"
+      },
+      {
+        "id": 3954715195,
+        "url": "https://github.com/Khan/webapp/pull/42041#discussion_r3954715195"
+      }
+    ],
+    "proposals": [
+      {
+        "evidence": "`subject: String!` and `gradeLevel: String!` in `GenerateAssessmentEytLearnerInsightsInput` are required non-null with no default, breaking old callers during rolling deploys",
+        "ids": [
+          "correctness-reviewer-1",
+          "skill-auditor-ool-1",
+          "api-federation-compat-1"
+        ]
+      },
+      {
+        "evidence": "`GetSubjectForCode` and `GetGradeLevelForCode` in `learner_insights_standards.go` have zero callers after this diff removes the call sites in `preprocessor_LIStudent.go`",
+        "ids": [
+          "correctness-reviewer-4",
+          "skill-auditor-ool-4",
+          "holistic-2",
+          "completeness-1"
+        ]
+      },
+      {
+        "evidence": "`formatStudentGradeLevel` `default:` branch returns `string(GradeLevelHS)` for any input outside the five listed cases, silently misclassifying grades like \"3\", \"9\", or \"\"",
+        "ids": [
+          "security-auth-ool-1",
+          "api-federation-compat-ool-2",
+          "skill-auditor-ool-2",
+          "first-principles-1"
+        ]
+      },
+      {
+        "evidence": "`result.StandardSubject.String` and `result.StandardGradeLevel.String` read from nullable `pgtype.Text` columns without a `.Valid` check, sending `\"\"` as a valid `String!`",
+        "ids": [
+          "skill-auditor-ool-3",
+          "api-federation-compat-2"
+        ]
+      },
+      {
+        "evidence": "`<Code>%s</Code>` element removed from `<AssessmentContext>` in the merged `generateSingleItemXML` template",
+        "ids": [
+          "correctness-reviewer-5",
+          "api-federation-compat-ool-1",
+          "completeness-2",
+          "holistic-4"
+        ]
+      },
+      {
+        "evidence": "`GetSubjectForCode` and `GetGradeLevelForCode` have zero callers after the last call sites in `preprocessor_LITeacherItem.go` are removed",
+        "ids": [
+          "first-principles-2",
+          "conventions-1"
+        ]
+      }
+    ],
+    "expectedPairs": [
+      {
+        "ids": [
+          "completeness-1",
+          "first-principles-2"
+        ],
+        "samePath": false,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.30158730158730157,
+          "overlap": 0.4634146341463415,
+          "sharedBigrams": 8
+        },
+        "floor": {
+          "jaccard": 0.2,
+          "overlap": 0.35,
+          "sharedBigrams": 6
+        },
+        "similar": true
+      }
+    ]
+  },
+  {
+    "pr": 42040,
+    "run": 34189934557,
+    "claims": [
+      {
+        "id": "skill-auditor-1",
+        "source": "skill-auditor",
+        "path": "services/assessments/resolvers/get_or_create_learner_insights.go",
+        "line": 22,
+        "label": "issue (blocking, best-practice)",
+        "subject": "Shared-code governance: production resolver suppresses `ka-import` to import `services/ai-guide` \u2014 use a cross-service query or copy the map instead.",
+        "discussion": "Shared-code governance: production resolver suppresses `ka-import` to import `services/ai-guide` \u2014 use a cross-service query or copy the map instead. The added import is production code on a deployed request path (`queryResolver.GetAssessmentsLearnerInsights`), not a test or a script:\n\n```go\n\"github.com/Khan/webapp/services/ai-guide/internal_reasoning/preprocessors\" //nolint:ka-import // see above\n```\n\n`.claude/skills/shared-code-governance/SKILL.md` states the rule as non-negotiable: \"**No service may import from another service.** Services talk to each other over GraphQL, never by importing each other's Go packages.\" and \"When the linter flags a cross-service import in production code, the fix is never to suppress it \u2014 it's to choose the right tier from the decision tree above, or another sanctioned way across the boundary (a cross-service query, or copying with sync-tags). (Tests and scripts are the one tolerated exception.)\" The reference file is explicit about which code may suppress: \"The one tolerated exception is **non-production** code: test files (`*_test.go`) and command-line scripts (`cmd/*/main.go`) that aren't on any deployed request path\u2026 The test to apply: **if the code could ever run in production, don't suppress \u2014 share or copy it instead.**\"\n\nI checked the checkout: `grep -rn \"ai-guide/internal_reasoning/preprocessors\" --include=*.go services/assessments/` returns only the two import lines this PR adds, so no prior production precedent exists in `assessments` \u2014 the previous suppression lived in `cmd/fix_learner_insights/main.go`, which this PR deletes and which the skill explicitly tolerates as a script. The sanctioned options for the interim step are the ones the skill lists: a cross-service GraphQL query (which the PR description says is the eventual plan), or copying the small stable map into `assessments` wrapped in sync-tags so `code_syncing_lint.py` keeps the copies from drifting. That the suppression is temporary isn't one of the listed exceptions.",
+        "failure_scenario": "The `assessments` resolver that serves `GetAssessmentsLearnerInsights` on every learner-insights request now compiles `services/ai-guide` code into the `assessments` binary, so any change to ai-guide's `preprocessors` package forces an assessments redeploy and the two services are coupled on a deployed request path.",
+        "skill": "shared-code-governance",
+        "confidence": 0.7
+      },
+      {
+        "id": "holistic-1",
+        "source": "holistic",
+        "path": "services/assessments/resolvers/get_or_create_learner_insights.go",
+        "line": 22,
+        "label": "issue (blocking)",
+        "subject": "This trades a GraphQL field for a compile-time dependency from two production assessments resolvers on `services/ai-guide/internal_reasoning/preprocessors`, deepening the very coupling the PR removes; copy the skills map into assessments instead.",
+        "discussion": "This trades a GraphQL field for a compile-time dependency from two production assessments resolvers on `services/ai-guide/internal_reasoning/preprocessors`, deepening the very coupling the PR removes; copy the skills map into assessments instead. The PR removes `name` from the ai-guide\u2194assessments wire, but replaces it with a stronger coupling in the opposite direction: `services/assessments/resolvers/get_or_create_learner_insights.go:22` and `services/assessments/resolvers/reporting/classroom_insights.go:22` now import an ai-guide *internal* package from GraphQL resolvers, suppressed with `//nolint:ka-import`.\n\n`.claude/skills/shared-code-governance/references/crossing-import-boundaries.md` states the rule categorically: \"For anything that ships to production, the answer is never `//nolint`\" and \"if the code could ever run in production, don't suppress \u2014 share or copy it instead\"; the tolerated exception is only `*_test.go` and `cmd/*/main.go`. I grepped every non-test `nolint:ka-import` in the repo: all existing cross-service ones are `cmd/` scripts or dev tools (`content-editing/cmd/ai-translate-extracted-strings`, `districts/cmd/*`, `donations/cmd/*`, `ai-guide/cmd/user`); the rest are same-service `generated/graphql`. These two are the first cross-service imports on a deployed request path.\n\nWhat makes the seam clearly wrong rather than merely irregular: after this PR, `GetSkillsForCode` has zero ai-guide callers. Grepping the symbol repo-wide returns only the two new assessments lines \u2014 ai-guide still uses `GetSubjectForCode`/`GetGradeLevelForCode`, but the `Skills` data now exists solely to serve assessments. So the map's `Skills` column belongs in assessments today, which is also what the PR description argues (\"remove the map from ai-guide, where it doesn't belong\"). The decision table's sanctioned move for a small, stable helper is copy it into assessments with sync-tags; alternatively, since the description says the names are already in the assessments DB, read them there now and skip the intermediate hack entirely.\n\nI also checked the two things this could have broken and they are fine, so this is the only issue I'm raising: all nine codes in `mock_data/sample_insights.go` are present in the map (no name regressions from the removed hard-coded `Name`s), and the removed `name` field on the ai-guide types has no frontend consumer \u2014 grepping `*.ts/tsx/js/jsx/graphql` for `RollupDetailedSummaryResult` and `LearnerInsightsDetailedSummary` finds only the assessments schema's own retained type.",
+        "failure_scenario": "An ai-guide engineer edits or removes a `Skills` string in `StandardsToSkillsMap` (or renames `internal_reasoning/preprocessors` during the planned cleanup) with no signal that another service depends on it, and every teacher-facing assessments insight report silently shows a changed or empty `name` \u2014 or assessments simply stops compiling on an ai-guide-internal refactor.",
+        "suggestion": "// services/assessments/learner_insights/standards/skills.go (new)\n//\n// Skill names for standard codes. Read at insight-render time so a single\n// source of truth serves historical and new insights alike.\n// TODO(AX-3017): replace with a DB lookup and delete this map.\npackage standards\n\n// sync-start:standards-to-skills <checksum> services/ai-guide/internal_reasoning/preprocessors/learner_insights_standards.go\nvar codeToSkills = map[string]string{\n\t\"HSG.CO.B.6\": \"Predict how rigid motions affect a figure, and use rigid motions to determine the congruence of figures.\",\n\t// ... remaining entries copied from StandardsToSkillsMap\n}\n\n// sync-end:standards-to-skills\n\n// SkillsForCode returns the skill name for code, or \"\" if code is unmapped.\nfunc SkillsForCode(code string) string {\n\treturn codeToSkills[code]\n}\n\n// then in both resolvers, dropping the //nolint:ka-import import:\n//   Name: standards.SkillsForCode(summary.Code),",
+        "confidence": 0.7
+      }
+    ],
+    "comments": [
+      {
+        "id": 3954724389,
+        "url": "https://github.com/Khan/webapp/pull/42040#discussion_r3954724389"
+      },
+      {
+        "id": 3954724408,
+        "url": "https://github.com/Khan/webapp/pull/42040#discussion_r3954724408"
+      }
+    ],
+    "proposals": [
+      {
+        "evidence": "\"github.com/Khan/webapp/services/ai-guide/internal_reasoning/preprocessors\" //nolint:ka-import at line 22 of get_or_create_learner_insights.go \u2014 production resolver suppresses ka-import linter to import another service's internal package on a deployed request path",
+        "ids": [
+          "skill-auditor-1",
+          "security-auth-ool-1",
+          "holistic-1",
+          "api-federation-compat-ool-2",
+          "conventions-1"
+        ]
+      },
+      {
+        "evidence": "`_getLearnerInsightsQuery` in get_or_create_learner_insights_test.go never selects `name`, so `preprocessors.GetSkillsForCode(summary.Code)` at line 172 has no test coverage",
+        "ids": [
+          "correctness-reviewer-3",
+          "test-adequacy-1"
+        ]
+      },
+      {
+        "evidence": "`name: String!` deleted from `LearnerInsightsDetailedSummary`, `RollupDetailedSummaryInput`, and `RollupDetailedSummaryResult` in assessments_eyt_insights.graphql with no `@deprecated` step",
+        "ids": [
+          "skill-auditor-3",
+          "security-auth-ool-2",
+          "api-federation-compat-1"
+        ]
+      },
+      {
+        "evidence": "`preprocessors.GetSkillsForCode(s.Code)` at line 350 of classroom_insights.go is a bare map index (`return StandardsToSkillsMap[Standard(code)].Skills`) that silently returns `\"\"` for any code absent from the hardcoded map",
+        "ids": [
+          "api-federation-compat-ool-1",
+          "first-principles-2"
+        ]
+      }
+    ],
+    "expectedPairs": [
+      {
+        "ids": [
+          "skill-auditor-1",
+          "holistic-1"
+        ],
+        "samePath": true,
+        "sameSource": false,
+        "score": {
+          "jaccard": 0.16,
+          "overlap": 0.32432432432432434,
+          "sharedBigrams": 2
+        },
+        "floor": {
+          "jaccard": 0.14,
+          "overlap": 0.34,
+          "sharedBigrams": 4
+        },
+        "similar": false
+      }
+    ]
+  }
+]
