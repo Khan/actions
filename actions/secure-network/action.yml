@@ -19,6 +19,10 @@ inputs:
         default: ""
 
 runs:
+    # JavaScript actions run on the Node binary bundled with the runner, and
+    # `using` only accepts a major version (e.g. node20, node24). The exact
+    # patch version is whatever that runner release ships, so it can't be
+    # pinned here the way `shared-node-cache` pins `node-version`.
     using: "node24"
     main: "main.js"
     post: "post.js"
